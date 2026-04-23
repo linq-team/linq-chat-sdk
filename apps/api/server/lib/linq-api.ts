@@ -1,0 +1,120 @@
+import { HTTPError } from "nitro"
+
+const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner"
+
+export const LINQ_API_TOKEN_ENV_NAME = "LINQ_API_TOKEN"
+export const LINQ_WEBHOOK_VERSION = "2026-02-03"
+
+interface LinqApiErrorResponse {
+  error?: {
+    message?: string
+  }
+  message?: string
+}
+
+export interface LinqWebhookSubscription {
+  created_at: string
+  id: string
+  is_active: boolean
+  phone_numbers?: string[] | null
+  signing_secret: string
+  subscribed_events: string[]
+  target_url: string
+  updated_at: string
+}
+
+export function getLinqApiBaseUrl(): string {
+  return process.env.LINQ_API_BASE_URL?.trim() || DEFAULT_LINQ_API_BASE_URL
+}
+
+export function getLinqApiToken(): string | null {
+  return process.env[LINQ_API_TOKEN_ENV_NAME]?.trim() || null
+}
+
+export function hasLinqApiToken(): boolean {
+  return getLinqApiToken() !== null
+}
+
+export function buildLinqWebhookUrl(publicBaseUrl: string): string {
+  let base: URL
+
+  try {
+    base = new URL(publicBaseUrl)
+  } catch {
+    throw new HTTPError({
+      status: 400,
+      message: "Public app URL must be a valid absolute URL.",
+    })
+  }
+
+  if (base.protocol !== "https:" && base.protocol !== "http:") {
+    throw new HTTPError({
+      status: 400,
+      message: "Public app URL must use http or https.",
+    })
+  }
+
+  const normalizedBase = new URL(base.toString())
+  if (!normalizedBase.pathname.endsWith("/")) {
+    normalizedBase.pathname = `${normalizedBase.pathname}/`
+  }
+
+  const webhookUrl = new URL("api/webhooks/linq", normalizedBase)
+  webhookUrl.searchParams.set("version", LINQ_WEBHOOK_VERSION)
+  return webhookUrl.toString()
+}
+
+async function callLinqApi<T>(path: string, init: RequestInit): Promise<T> {
+  const token = getLinqApiToken()
+
+  if (!token) {
+    throw new HTTPError({
+      status: 400,
+      message: `${LINQ_API_TOKEN_ENV_NAME} is not configured.`,
+    })
+  }
+
+  const headers = new Headers(init.headers)
+  headers.set("authorization", `Bearer ${token}`)
+  headers.set("content-type", "application/json")
+
+  const response = await fetch(new URL(path, `${getLinqApiBaseUrl()}/`).toString(), {
+    ...init,
+    headers,
+  })
+
+  const responseText = await response.text()
+  let data: T | LinqApiErrorResponse | null = null
+
+  if (responseText) {
+    try {
+      data = JSON.parse(responseText) as T | LinqApiErrorResponse
+    } catch {
+      throw new HTTPError({
+        status: 502,
+        message: `Linq API request to ${path} returned invalid JSON.`,
+      })
+    }
+  }
+
+  if (!response.ok || data === null) {
+    const error = data as LinqApiErrorResponse | null
+
+    throw new HTTPError({
+      status: 502,
+      message: error?.error?.message || error?.message || `Linq API request to ${path} failed.`,
+    })
+  }
+
+  return data as T
+}
+
+export async function createLinqWebhookSubscription(targetUrl: string): Promise<LinqWebhookSubscription> {
+  return callLinqApi<LinqWebhookSubscription>("v3/webhook-subscriptions", {
+    method: "POST",
+    body: JSON.stringify({
+      target_url: targetUrl,
+      subscribed_events: ["message.received"],
+    }),
+  })
+}

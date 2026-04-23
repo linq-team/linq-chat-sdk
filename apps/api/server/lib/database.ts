@@ -1,6 +1,9 @@
 import pg from "pg"
 
 const APP_SETTINGS_TABLE = "app_runtime_settings"
+const LINQ_WEBHOOK_EVENTS_TABLE = "linq_webhook_events"
+const LINQ_WEBHOOK_SECRET_KEY = "linq_webhook_secret"
+const LINQ_WEBHOOK_SUBSCRIPTION_ID_KEY = "linq_webhook_subscription_id"
 const TELEGRAM_WEBHOOK_SECRET_KEY = "telegram_webhook_secret"
 
 let pool: pg.Pool | undefined
@@ -9,6 +12,14 @@ export interface AppSettingRecord {
   key: string
   value: string
   updatedAt: string
+}
+
+export interface StoreLinqWebhookEventInput {
+  eventId: string | null
+  eventType: string | null
+  headers: Record<string, string>
+  payload: unknown
+  subscriptionId: string | null
 }
 
 function getDatabaseUrl(): string | null {
@@ -39,6 +50,20 @@ export async function ensureAppSettingsTable(): Promise<void> {
       key text PRIMARY KEY,
       value text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+}
+
+export async function ensureLinqWebhookEventsTable(): Promise<void> {
+  await getPostgresPool().query(`
+    CREATE TABLE IF NOT EXISTS ${LINQ_WEBHOOK_EVENTS_TABLE} (
+      id bigserial PRIMARY KEY,
+      event_id text UNIQUE,
+      event_type text,
+      subscription_id text,
+      headers jsonb NOT NULL,
+      payload jsonb NOT NULL,
+      received_at timestamptz NOT NULL DEFAULT now()
     )
   `)
 }
@@ -114,4 +139,53 @@ export async function setTelegramWebhookSecret(secret: string): Promise<void> {
 
 export async function deleteTelegramWebhookSecret(): Promise<void> {
   await deleteAppSetting(TELEGRAM_WEBHOOK_SECRET_KEY)
+}
+
+export async function getLinqWebhookSecretRecord(): Promise<AppSettingRecord | null> {
+  return getAppSettingRecord(LINQ_WEBHOOK_SECRET_KEY)
+}
+
+export async function getLinqWebhookSecret(): Promise<string | null> {
+  return getAppSetting(LINQ_WEBHOOK_SECRET_KEY)
+}
+
+export async function setLinqWebhookSecret(secret: string): Promise<void> {
+  await setAppSetting(LINQ_WEBHOOK_SECRET_KEY, secret)
+}
+
+export async function getLinqWebhookSubscriptionId(): Promise<string | null> {
+  return getAppSetting(LINQ_WEBHOOK_SUBSCRIPTION_ID_KEY)
+}
+
+export async function setLinqWebhookSubscriptionId(subscriptionId: string): Promise<void> {
+  await setAppSetting(LINQ_WEBHOOK_SUBSCRIPTION_ID_KEY, subscriptionId)
+}
+
+export async function storeLinqWebhookEvent(input: StoreLinqWebhookEventInput): Promise<boolean> {
+  await ensureLinqWebhookEventsTable()
+
+  const result = await getPostgresPool().query(
+    `
+      INSERT INTO ${LINQ_WEBHOOK_EVENTS_TABLE} (
+        event_id,
+        event_type,
+        subscription_id,
+        headers,
+        payload
+      )
+      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+      ON CONFLICT (event_id)
+      DO NOTHING
+      RETURNING id
+    `,
+    [
+      input.eventId,
+      input.eventType,
+      input.subscriptionId,
+      JSON.stringify(input.headers),
+      JSON.stringify(input.payload),
+    ],
+  )
+
+  return (result.rowCount ?? 0) > 0
 }

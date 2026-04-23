@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LINQ Telegram Bot Setup</title>
+  <title>LINQ Chat SDK Setup</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -12,11 +12,11 @@
 <body>
   <main class="shell">
     <section class="hero panel">
-      <p class="eyebrow">LINQ Chat SDK / Telegram</p>
-      <h1>Wire your Telegram bot into this API without touching raw webhook commands.</h1>
+      <p class="eyebrow">LINQ Chat SDK / Telegram + Linq</p>
+      <h1>Wire Telegram and Linq into this API without touching raw webhook commands.</h1>
       <p class="lede">
-        This page checks Postgres, verifies your Telegram bot token, stores the webhook secret in the database,
-        and registers the webhook URL for you.
+        This page checks Postgres, verifies your Telegram bot token, stores webhook secrets in the database,
+        and lets you register both the Telegram bot webhook and the minimal Linq inbound-message webhook.
       </p>
       <div class="hero-actions">
         <a class="ghost-link" href="/api" target="_blank" rel="noopener noreferrer">Inspect API routes</a>
@@ -27,13 +27,13 @@
       <section class="panel stack">
         <div class="section-heading">
           <p class="eyebrow">Setup Control</p>
-          <h2>Register Telegram Webhook</h2>
+          <h2>Register Webhooks</h2>
         </div>
 
         <label class="field">
           <span>Public app URL</span>
           <input id="public-base-url" type="url" placeholder="https://your-domain.com" autocomplete="off">
-          <small>Used to build <code>/api/webhooks/telegram</code>. Change this if you are behind a proxy or tunnel.</small>
+          <small>Used to build <code>/api/webhooks/telegram</code> and <code>/api/webhooks/linq?version=2026-02-03</code>. Change this if you are behind a proxy or tunnel.</small>
         </label>
 
         <label class="field">
@@ -48,9 +48,14 @@
         </label>
 
         <div class="action-row">
-          <button id="register-webhook" type="button">Register webhook</button>
+          <button id="register-webhook" type="button">Register Telegram webhook</button>
+          <button id="register-linq-webhook" class="secondary" type="button">Register Linq webhook</button>
           <button id="refresh-status" class="secondary" type="button">Refresh status</button>
         </div>
+
+        <p class="note">
+          The Linq setup button creates the smallest subscription possible: <code>message.received</code> only, with the signing secret stored in Postgres for raw payload intake.
+        </p>
 
         <div id="flash" class="flash hidden" role="status" aria-live="polite"></div>
       </section>
@@ -163,6 +168,7 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
     const setupTokenInput = document.getElementById("setup-token");
     const rotateSecretInput = document.getElementById("rotate-secret");
     const registerWebhookButton = document.getElementById("register-webhook");
+    const registerLinqWebhookButton = document.getElementById("register-linq-webhook");
     const refreshStatusButton = document.getElementById("refresh-status");
     const flash = document.getElementById("flash");
 
@@ -312,7 +318,39 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
       }
     }
 
+    async function registerLinqWebhook() {
+      registerLinqWebhookButton.disabled = true;
+      setFlash("Registering Linq webhook…", "info");
+
+      try {
+        const response = await fetch("/api/linq/setup/webhook", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+          body: JSON.stringify({
+            publicBaseUrl: publicBaseUrlInput.value.trim(),
+          }),
+        });
+
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body.message || "Unable to register Linq webhook.");
+        }
+
+        setFlash(`Linq webhook registered for ${body.webhookUrl}`, "good");
+        statusJson.textContent = JSON.stringify(body, null, 2);
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : "Unable to register Linq webhook.", "bad");
+      } finally {
+        registerLinqWebhookButton.disabled = false;
+      }
+    }
+
     registerWebhookButton.addEventListener("click", registerWebhook);
+    registerLinqWebhookButton.addEventListener("click", registerLinqWebhook);
     refreshStatusButton.addEventListener("click", loadStatus);
 
     loadStatus().catch((error) => {
