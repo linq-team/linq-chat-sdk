@@ -3,18 +3,321 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Nitro Starter</title>
+  <title>LINQ Telegram Bot Setup</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="card">
-    <h1>This is your brand new Nitro project 🚀</h1>
-    <p>Get started by editing the <code>index.html</code> or <code>routes/api/index.ts</code></p>
-    <p>Learn more from 📖 <a href="https://v3.nitro.build/docs" target="_blank" rel="noopener noreferrer">Nitro Documentation</a></p>
-    <pre class="api"><code>{{{ serverFetch("/api") }}}</code></pre>
+  <main class="shell">
+    <section class="hero panel">
+      <p class="eyebrow">LINQ Chat SDK / Telegram</p>
+      <h1>Wire your Telegram bot into this API without touching raw webhook commands.</h1>
+      <p class="lede">
+        This page checks Postgres, verifies your Telegram bot token, stores the webhook secret in the database,
+        and registers the webhook URL for you.
+      </p>
+      <div class="hero-actions">
+        <a class="ghost-link" href="/api" target="_blank" rel="noopener noreferrer">Inspect API routes</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      <section class="panel stack">
+        <div class="section-heading">
+          <p class="eyebrow">Setup Control</p>
+          <h2>Register Telegram Webhook</h2>
+        </div>
+
+        <label class="field">
+          <span>Public app URL</span>
+          <input id="public-base-url" type="url" placeholder="https://your-domain.com" autocomplete="off">
+          <small>Used to build <code>/api/webhooks/telegram</code>. Change this if you are behind a proxy or tunnel.</small>
+        </label>
+
+        <label class="field">
+          <span>Setup access token</span>
+          <input id="setup-token" type="password" placeholder="Only needed if BOT_SETUP_ACCESS_TOKEN is set" autocomplete="off">
+          <small>Optional guard for the setup endpoints. The app never writes this token anywhere.</small>
+        </label>
+
+        <label class="toggle">
+          <input id="rotate-secret" type="checkbox">
+          <span>Rotate the stored webhook secret before registering the webhook</span>
+        </label>
+
+        <div class="action-row">
+          <button id="register-webhook" type="button">Register webhook</button>
+          <button id="refresh-status" class="secondary" type="button">Refresh status</button>
+        </div>
+
+        <div id="flash" class="flash hidden" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel stack">
+        <div class="section-heading">
+          <p class="eyebrow">Status</p>
+          <h2>Connection Snapshot</h2>
+        </div>
+
+        <div class="status-list">
+          <article class="status-card">
+            <div>
+              <p class="status-label">Database</p>
+              <strong id="database-state">Checking…</strong>
+            </div>
+            <span id="database-badge" class="badge">Pending</span>
+          </article>
+
+          <article class="status-card">
+            <div>
+              <p class="status-label">Telegram token</p>
+              <strong id="telegram-token-state">Checking…</strong>
+            </div>
+            <span id="telegram-token-badge" class="badge">Pending</span>
+          </article>
+
+          <article class="status-card">
+            <div>
+              <p class="status-label">Webhook secret</p>
+              <strong id="webhook-secret-state">Checking…</strong>
+            </div>
+            <span id="webhook-secret-badge" class="badge">Pending</span>
+          </article>
+
+          <article class="status-card">
+            <div>
+              <p class="status-label">Telegram webhook</p>
+              <strong id="webhook-state">Checking…</strong>
+            </div>
+            <span id="webhook-badge" class="badge">Pending</span>
+          </article>
+        </div>
+
+        <dl class="detail-list">
+          <div>
+            <dt>Expected webhook</dt>
+            <dd id="expected-webhook">—</dd>
+          </div>
+          <div>
+            <dt>Stored secret</dt>
+            <dd id="secret-preview">—</dd>
+          </div>
+          <div>
+            <dt>Telegram bot</dt>
+            <dd id="telegram-bot">—</dd>
+          </div>
+          <div>
+            <dt>Telegram username env</dt>
+            <dd id="configured-username">—</dd>
+          </div>
+          <div>
+            <dt>Setup access token</dt>
+            <dd id="access-requirement">—</dd>
+          </div>
+        </dl>
+
+        <pre class="api"><code id="status-json">Loading status…</code></pre>
+      </section>
+    </section>
+
+    <section class="grid lower-grid">
+      <section class="panel stack">
+        <div class="section-heading">
+          <p class="eyebrow">BotFather Guide</p>
+          <h2>Make the Telegram bot</h2>
+        </div>
+
+        <ol class="steps">
+          <li>Open Telegram and start a chat with <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>.</li>
+          <li>Send <code>/newbot</code> and choose a display name for the bot.</li>
+          <li>Choose a username that ends in <code>bot</code>, like <code>linq_support_bot</code>.</li>
+          <li>Copy the token BotFather gives you and set it as <code>TELEGRAM_BOT_TOKEN</code>.</li>
+          <li>Set <code>TELEGRAM_BOT_USERNAME</code> to the username without the leading <code>@</code>.</li>
+          <li>Set <code>POSTGRES_URL</code> or <code>DATABASE_URL</code> for this app, then come back here and click <strong>Register webhook</strong>.</li>
+          <li>After registration succeeds, open your bot chat and send <code>/start</code> or any message to verify the API responds.</li>
+        </ol>
+      </section>
+
+      <section class="panel stack">
+        <div class="section-heading">
+          <p class="eyebrow">Required Env</p>
+          <h2>What to configure</h2>
+        </div>
+
+        <pre class="api"><code>POSTGRES_URL=postgres://...
+TELEGRAM_BOT_TOKEN=123456:ABCDEF...
+TELEGRAM_BOT_USERNAME=your_bot_name
+BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
+
+        <p class="note">
+          <strong>Tip:</strong> if you use the optional setup token, enter the same value in the field above before refreshing status or registering the webhook.
+        </p>
+      </section>
+    </section>
   </main>
+
+  <script>
+    const publicBaseUrlInput = document.getElementById("public-base-url");
+    const setupTokenInput = document.getElementById("setup-token");
+    const rotateSecretInput = document.getElementById("rotate-secret");
+    const registerWebhookButton = document.getElementById("register-webhook");
+    const refreshStatusButton = document.getElementById("refresh-status");
+    const flash = document.getElementById("flash");
+
+    const databaseState = document.getElementById("database-state");
+    const databaseBadge = document.getElementById("database-badge");
+    const telegramTokenState = document.getElementById("telegram-token-state");
+    const telegramTokenBadge = document.getElementById("telegram-token-badge");
+    const webhookSecretState = document.getElementById("webhook-secret-state");
+    const webhookSecretBadge = document.getElementById("webhook-secret-badge");
+    const webhookState = document.getElementById("webhook-state");
+    const webhookBadge = document.getElementById("webhook-badge");
+
+    const expectedWebhook = document.getElementById("expected-webhook");
+    const secretPreview = document.getElementById("secret-preview");
+    const telegramBot = document.getElementById("telegram-bot");
+    const configuredUsername = document.getElementById("configured-username");
+    const accessRequirement = document.getElementById("access-requirement");
+    const statusJson = document.getElementById("status-json");
+
+    publicBaseUrlInput.value = window.location.origin;
+
+    function authHeaders() {
+      const token = setupTokenInput.value.trim();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
+    function setFlash(message, tone) {
+      flash.textContent = message;
+      flash.className = `flash ${tone}`;
+    }
+
+    function setBadge(element, label, tone) {
+      element.textContent = label;
+      element.className = `badge ${tone}`;
+    }
+
+    function updateStatusCard(labelElement, badgeElement, label, detail, tone) {
+      labelElement.textContent = detail;
+      setBadge(badgeElement, label, tone);
+    }
+
+    function renderStatus(payload) {
+      const database = payload.environment.database;
+      const telegram = payload.telegram;
+      const setup = payload.setup;
+
+      updateStatusCard(
+        databaseState,
+        databaseBadge,
+        database.connected ? "Connected" : database.configured ? "Needs attention" : "Missing",
+        database.connected ? "Postgres is reachable" : database.error || "Add POSTGRES_URL or DATABASE_URL",
+        database.connected ? "good" : database.configured ? "warn" : "bad",
+      );
+
+      updateStatusCard(
+        telegramTokenState,
+        telegramTokenBadge,
+        telegram.reachable ? "Ready" : payload.environment.telegram.tokenConfigured ? "Needs attention" : "Missing",
+        telegram.reachable ? "Telegram token can reach Bot API" : telegram.error || "Add TELEGRAM_BOT_TOKEN",
+        telegram.reachable ? "good" : payload.environment.telegram.tokenConfigured ? "warn" : "bad",
+      );
+
+      updateStatusCard(
+        webhookSecretState,
+        webhookSecretBadge,
+        setup.webhookSecretConfigured ? "Stored" : "Missing",
+        setup.webhookSecretConfigured
+          ? `Stored in Postgres${setup.webhookSecretUpdatedAt ? ` since ${new Date(setup.webhookSecretUpdatedAt).toLocaleString()}` : ""}`
+          : "Click Register webhook to create one",
+        setup.webhookSecretConfigured ? "good" : "warn",
+      );
+
+      updateStatusCard(
+        webhookState,
+        webhookBadge,
+        telegram.webhookMatchesExpected ? "Registered" : telegram.webhookInfo?.url ? "Mismatch" : "Not set",
+        telegram.webhookInfo?.url || "Telegram has no webhook configured yet",
+        telegram.webhookMatchesExpected ? "good" : telegram.webhookInfo?.url ? "warn" : "bad",
+      );
+
+      expectedWebhook.textContent = setup.expectedWebhookUrl;
+      secretPreview.textContent = setup.webhookSecretPreview || "Not created yet";
+      configuredUsername.textContent = payload.environment.telegram.configuredUserName || "Not set";
+      accessRequirement.textContent = payload.access.required
+        ? `${payload.access.envName} is enabled`
+        : "Open setup mode (no access token configured)";
+
+      if (telegram.bot?.username) {
+        telegramBot.innerHTML = `<a href="https://t.me/${telegram.bot.username}" target="_blank" rel="noopener noreferrer">@${telegram.bot.username}</a>`;
+      } else {
+        telegramBot.textContent = telegram.bot?.first_name || "Unavailable";
+      }
+
+      statusJson.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function loadStatus() {
+      setFlash("Refreshing status…", "info");
+
+      const response = await fetch("/api/telegram/setup/status", {
+        headers: authHeaders(),
+      });
+
+      const body = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const message = body.message || "Unable to load setup status.";
+        setFlash(message, "bad");
+        statusJson.textContent = JSON.stringify(body, null, 2);
+        return;
+      }
+
+      renderStatus(body);
+      setFlash("Status refreshed.", "good");
+    }
+
+    async function registerWebhook() {
+      registerWebhookButton.disabled = true;
+      setFlash("Registering Telegram webhook…", "info");
+
+      try {
+        const response = await fetch("/api/telegram/setup/webhook", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+          body: JSON.stringify({
+            publicBaseUrl: publicBaseUrlInput.value.trim(),
+            rotateSecret: rotateSecretInput.checked,
+          }),
+        });
+
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body.message || "Unable to register Telegram webhook.");
+        }
+
+        setFlash(`Webhook registered for ${body.webhookUrl}`, "good");
+        statusJson.textContent = JSON.stringify(body, null, 2);
+        await loadStatus();
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : "Unable to register Telegram webhook.", "bad");
+      } finally {
+        registerWebhookButton.disabled = false;
+      }
+    }
+
+    registerWebhookButton.addEventListener("click", registerWebhook);
+    refreshStatusButton.addEventListener("click", loadStatus);
+
+    loadStatus().catch((error) => {
+      setFlash(error instanceof Error ? error.message : "Unable to load setup status.", "bad");
+    });
+  </script>
 </body>
 </html>

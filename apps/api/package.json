@@ -10,9 +10,15 @@
     "#*": "./*"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/pg": "^8.20.0",
     "nitro": "latest"
   },
   "dependencies": {
-    "@linq-chat-sdk/adapter-linq": "workspace:*"
+    "@chat-adapter/state-pg": "^4.26.0",
+    "@chat-adapter/telegram": "^4.26.0",
+    "@linq-chat-sdk/adapter-linq": "workspace:*",
+    "chat": "^4.26.0",
+    "pg": "^8.20.0"
   }
 }

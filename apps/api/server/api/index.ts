@@ -1,6 +1,13 @@
 import { defineHandler } from "nitro"
-import { LINQ_ADAPTER_SENTINEL } from "@linq-chat-sdk/adapter-linq"
 
-export default defineHandler((event) => {
-  return { message: "Hello from API!", adapter: LINQ_ADAPTER_SENTINEL };
-});
+export default defineHandler(() => {
+  return {
+    service: "linq-chat-sdk telegram bot",
+    setupPage: "/",
+    routes: {
+      webhook: "/api/webhooks/telegram",
+      setupStatus: "/api/telegram/setup/status",
+      setupWebhook: "/api/telegram/setup/webhook",
+    },
+  }
+})
