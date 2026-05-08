@@ -2,7 +2,7 @@ import { createPostgresState } from "@chat-adapter/state-pg"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 
-import { getPostgresPool } from "./database"
+import { getPostgresPool, getTelegramWebhookSecret } from "./database"
 
 let bot: Chat<{ telegram: ReturnType<typeof createTelegramAdapter> }> | undefined
 
@@ -20,8 +20,9 @@ function buildReply(text: string): string {
   ].join("\n")
 }
 
-function createBot() {
-  const telegram = createTelegramAdapter({ mode: "webhook" })
+async function createBot() {
+  const telegramSecret = await getTelegramWebhookSecret()
+  const telegram = createTelegramAdapter({ mode: "webhook", secretToken: telegramSecret ?? undefined })
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
@@ -56,9 +57,9 @@ function createBot() {
   return chat
 }
 
-export function getBot() {
+export async function getBot() {
   if (!bot) {
-    bot = createBot()
+    bot = await createBot()
   }
 
   return bot
