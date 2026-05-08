@@ -1,18 +1,28 @@
+import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq"
 import { createPostgresState } from "@chat-adapter/state-pg"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 
-import { getPostgresPool, getTelegramWebhookSecret } from "./database"
+import {
+  getLinqWebhookSecret,
+  getPostgresPool,
+  getTelegramWebhookSecret,
+  storeLinqWebhookEvent,
+} from "./database"
+import { getLinqApiBaseUrl, getLinqApiToken } from "./linq-api"
 
-let bot: Chat<{ telegram: ReturnType<typeof createTelegramAdapter> }> | undefined
+let bot: Chat<{
+  linq: ReturnType<typeof createLinqAdapter>
+  telegram: ReturnType<typeof createTelegramAdapter>
+}> | undefined
 
 function buildReply(text: string): string {
   if (!text.trim()) {
-    return "Telegram is connected to this API. Replace this starter reply with your real bot workflow."
+    return "Chat SDK is connected to this API. Replace this starter reply with your real bot workflow."
   }
 
   return [
-    "Telegram is connected to this API.",
+    "Chat SDK is connected to this API.",
     "",
     "Replace this starter reply with your real bot workflow.",
     "",
@@ -23,10 +33,20 @@ function buildReply(text: string): string {
 async function createBot() {
   const telegramSecret = await getTelegramWebhookSecret()
   const telegram = createTelegramAdapter({ mode: "webhook", secretToken: telegramSecret ?? undefined })
+  const linq = createLinqAdapter({
+    apiBaseUrl: getLinqApiBaseUrl(),
+    apiToken: getLinqApiToken,
+    getSigningSecret: getLinqWebhookSecret,
+    onWebhookEvent: async (record) => {
+      await storeLinqWebhookEvent(record)
+    },
+    userName: process.env.LINQ_BOT_USERNAME?.trim() || process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
+  })
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
     adapters: {
+      linq,
       telegram,
     },
     state: createPostgresState({
