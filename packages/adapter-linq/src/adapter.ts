@@ -5,6 +5,7 @@ import {
   NotImplementedError,
   defaultEmojiResolver,
   parseMarkdown,
+  stringifyMarkdown,
 } from "chat";
 import type {
   Adapter,
@@ -419,8 +420,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Random
-  renderFormatted(_content: FormattedContent): string {
-    throw new NotImplementedError("renderFormatted is not implemented");
+  renderFormatted(content: FormattedContent): string {
+    return stringifyMarkdown(content).trim();
   }
 
   channelIdFromThreadId(threadId: string): string {

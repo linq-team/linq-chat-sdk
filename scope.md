@@ -17,6 +17,7 @@ The adapter can already handle the core receive/reply path:
 - Fetch recent chat history with `chats.messages.list()`.
 - Fetch a single message with `messages.retrieve()`.
 - Edit text messages with `messages.update()`.
+- Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
 - Show typing indicators for direct-message chats.
 
@@ -40,19 +41,7 @@ Only implement this if product explicitly accepts the narrower Linq semantics.
 
 
 
-### 2. Render formatted content
-
-Status: **not implemented**
-
-`renderFormatted()` still throws.
-
-Current outbound text goes through `LinqFormatConverter.renderPostable()` in `postMessage()`, which is enough for simple posting.
-
-Still worth adding later as a plain-text or markdown fallback if other Chat SDK paths call it directly.
-
-
-
-### 3. Direct-message detection
+### 2. Direct-message detection
 
 Status: **stubbed**
 
@@ -68,7 +57,7 @@ Possible fixes:
 
 
 
-### 4. Group-safe typing indicators
+### 3. Group-safe typing indicators
 
 Status: **partially implemented**
 
@@ -85,7 +74,7 @@ Do not hide unrelated typing errors.
 
 
 
-### 5. Richer inbound message parsing
+### 4. Richer inbound message parsing
 
 Status: **basic but useful**
 
@@ -108,7 +97,7 @@ Still missing:
 
 
 
-### 6. Outbound attachments and media
+### 5. Outbound attachments and media
 
 Status: **not implemented**
 
@@ -124,7 +113,7 @@ Likely areas to check:
 
 
 
-### 7. Inbound reaction webhooks
+### 6. Inbound reaction webhooks
 
 Status: **not implemented**
 
@@ -141,7 +130,7 @@ Then map those webhooks into `chat.processReaction()`.
 
 
 
-### 8. Opening new direct messages / creating chats
+### 7. Opening new direct messages / creating chats
 
 Status: **not implemented**
 
@@ -155,7 +144,7 @@ This needs a deliberate product/API decision before implementation.
 
 
 
-### 9. Channel and thread listing APIs
+### 8. Channel and thread listing APIs
 
 Status: **not implemented**
 
@@ -165,7 +154,7 @@ Skip channel-level APIs unless the app needs them later.
 
 
 
-### 10. Native streaming
+### 9. Native streaming
 
 Status: **intentionally not implemented**
 
