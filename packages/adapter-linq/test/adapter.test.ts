@@ -5,10 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createLinqAdapter } from "../src/adapter.js";
 
 const SIGNING_SECRET = "test_linq_webhook_secret";
+const API_KEY = "test_linq_api_key";
 
 describe("LinqAdapter.handleWebhook", () => {
   it("returns 401 when signature headers are missing", async () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     const request = new Request("https://example.com/webhooks/linq", {
       method: "POST",
       body: "{}",
@@ -20,7 +21,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("returns 401 when the signature is invalid", async () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     const request = createSignedRequest({ ok: true }, { signature: "00" });
 
     const response = await adapter.handleWebhook(request);
@@ -29,7 +30,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("returns 200 for a valid signed message.received webhook", async () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     const request = createSignedRequest(createMessageReceivedPayload());
 
     const response = await adapter.handleWebhook(request);
@@ -38,7 +39,7 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 
   it("dispatches inbound message.received webhooks to Chat SDK", async () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
     (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
       processMessage,
@@ -61,7 +62,7 @@ describe("LinqAdapter.handleWebhook", () => {
 
 describe("LinqAdapter.parseMessage", () => {
   it("normalizes text message.received data", () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
 
     const message = adapter.parseMessage(createMessageReceivedPayload().data);
@@ -82,7 +83,7 @@ describe("LinqAdapter.parseMessage", () => {
   });
 
   it("normalizes media parts as attachments", () => {
-    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
     const payload = createMessageReceivedPayload();
     payload.data.parts = [
@@ -110,6 +111,68 @@ describe("LinqAdapter.parseMessage", () => {
     ]);
   });
 });
+
+describe("LinqAdapter.postMessage", () => {
+  it("sends a text message to an existing Linq chat", async () => {
+    const adapter = createTestAdapter();
+    const send = vi.fn().mockResolvedValue({
+      chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+      message: {
+        id: "outbound-message-id",
+        created_at: "2026-05-08T16:22:00.000Z",
+        delivery_status: "queued",
+        is_read: false,
+        parts: [{ type: "text", value: "hello" }],
+        sent_at: null,
+      },
+    });
+    (
+      adapter as unknown as { apiClient: { chats: { messages: { send: typeof send } } } }
+    ).apiClient = {
+      chats: { messages: { send } },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
+      chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+    });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq-chat-123");
+
+    const result = await adapter.postMessage("linq-chat-123", " hello ");
+
+    expect(send).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc", {
+      message: {
+        parts: [{ type: "text", value: "hello" }],
+      },
+    });
+    expect(result).toEqual({
+      id: "outbound-message-id",
+      threadId: "linq-chat-123",
+      raw: {
+        chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+        message: {
+          id: "outbound-message-id",
+          created_at: "2026-05-08T16:22:00.000Z",
+          delivery_status: "queued",
+          is_read: false,
+          parts: [{ type: "text", value: "hello" }],
+          sent_at: null,
+        },
+      },
+    });
+  });
+
+  it("rejects empty messages", async () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-id" });
+
+    await expect(adapter.postMessage("linq-chat-id", "   ")).rejects.toThrow(
+      "Linq message text cannot be empty.",
+    );
+  });
+});
+
+function createTestAdapter() {
+  return createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
+}
 
 function createSignedRequest(
   payload: unknown,

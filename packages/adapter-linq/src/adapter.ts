@@ -15,9 +15,11 @@ import type {
   WebhookOptions,
 } from "chat";
 
+import { LinqFormatConverter } from "./format-converter.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
 
-type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"];
+type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
+type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"] | LinqMessageSendResponse;
 type LinqMessageEvent = LinqAPIV3.MessageEventV2;
 
 type LinqThreadId = {
@@ -25,18 +27,23 @@ type LinqThreadId = {
 };
 
 export interface LinqAdapterConfig {
+  apiKey: string;
+  baseURL?: string;
   signingSecret: string;
 }
 
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
+  private readonly apiClient: LinqAPIV3;
+  private readonly converter = new LinqFormatConverter();
   private readonly signingSecret: string;
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
 
   constructor(config: LinqAdapterConfig) {
+    this.apiClient = new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL });
     this.signingSecret = config.signingSecret;
     this.logger = new ConsoleLogger();
   }
@@ -65,11 +72,28 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     throw new NotImplementedError("fetchMessage is not implemented");
   }
 
-  postMessage(
-    _threadId: string,
-    _message: AdapterPostableMessage,
+  async postMessage(
+    threadId: string,
+    message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    throw new NotImplementedError("postMessage is not implemented");
+    const { chatId } = this.decodeThreadId(threadId);
+    const text = this.converter.renderPostable(message).trim();
+
+    if (!text) {
+      throw new Error("Linq message text cannot be empty.");
+    }
+
+    const response = await this.apiClient.chats.messages.send(chatId, {
+      message: {
+        parts: [{ type: "text", value: text }],
+      },
+    });
+
+    return {
+      id: response.message.id,
+      threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
+      raw: response,
+    };
   }
 
   editMessage(

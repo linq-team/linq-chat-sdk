@@ -8,6 +8,7 @@ import {
   getPostgresPool,
   getTelegramWebhookSecret,
 } from "./database"
+import { getLinqApiBaseUrl, getLinqApiToken } from "./linq-api"
 
 let bot: Chat<{
   linq: ReturnType<typeof createLinqAdapter>
@@ -32,7 +33,11 @@ async function createBot() {
   const telegramSecret = await getTelegramWebhookSecret()
   const telegram = createTelegramAdapter({ mode: "webhook", secretToken: telegramSecret ?? undefined })
   const linqSigningSecret = await getLinqWebhookSecret()
-  const linq = createLinqAdapter({ signingSecret: linqSigningSecret ?? "" })
+  const linq = createLinqAdapter({
+    apiKey: getLinqApiToken() ?? "",
+    baseURL: getLinqApiBaseUrl(),
+    signingSecret: linqSigningSecret ?? "",
+  })
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
