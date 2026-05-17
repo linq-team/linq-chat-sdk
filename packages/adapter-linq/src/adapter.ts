@@ -1,22 +1,13 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
-import {
-  ConsoleLogger,
-  Message,
-  NotImplementedError,
-  defaultEmojiResolver,
-  parseMarkdown,
-  stringifyMarkdown,
-} from "chat";
+import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "chat";
 import type {
   Adapter,
   AdapterPostableMessage,
-  Attachment,
   ChatInstance,
   EmojiValue,
   FetchOptions,
   FetchResult,
   FormattedContent,
-  LinkPreview,
   Logger,
   RawMessage,
   StreamChunk,
@@ -25,32 +16,14 @@ import type {
 } from "chat";
 
 import { LinqFormatConverter } from "./format-converter.js";
+import { isRecord } from "./guards.js";
+import {
+  isMessageReceivedWebhookEvent,
+  parseLinqMessage,
+  type LinqRawMessage,
+} from "./message-parser.js";
+import { toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
-
-type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
-type LinqRetrievedMessage = LinqAPIV3.Message;
-type LinqRawMessage =
-  | LinqAPIV3.EventsWebhookEvent["data"]
-  | LinqMessageSendResponse
-  | LinqRetrievedMessage;
-type LinqMessageEvent = LinqAPIV3.MessageEventV2;
-type LinqMessagePart =
-  | {
-      type: "text" | "link";
-      value: string;
-    }
-  | {
-      type: "media";
-      id?: string;
-      url: string;
-      filename: string;
-      mime_type: string;
-      size_bytes: number;
-      width?: number;
-      height?: number;
-      width_px?: number;
-      height_px?: number;
-    };
 
 type LinqThreadId = {
   chatId: string;
@@ -124,7 +97,14 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     });
 
     return {
-      messages: page.messages.map((message) => this.parseMessage(message)).sort(compareMessages),
+      messages: page.messages
+        .map((message) => this.parseMessage(message))
+        .sort(function compareMessages(
+          left: Message<LinqRawMessage>,
+          right: Message<LinqRawMessage>,
+        ): number {
+          return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
+        }),
       nextCursor: page.next_cursor || undefined,
     };
   }
@@ -309,208 +289,10 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     return new Response("OK", { status: 200 });
-
-    function isMessageReceivedWebhookEvent(
-      event: LinqWebhookEvent,
-    ): event is LinqAPIV3.Webhooks.MessageReceivedWebhookEvent {
-      return event.event_type === "message.received";
-    }
   }
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
-    const message = normalizeMessage(raw);
-    const attachments = message.parts.flatMap((part): Attachment[] => {
-      if (part.type !== "media") {
-        return [];
-      }
-
-      return [toAttachment(part)];
-    });
-    const text = messageText(message.parts, attachments);
-    const links = messageLinks(message.parts);
-
-    const isMe = message.isMe;
-    const senderId = message.sender?.id || message.sender?.handle || "unknown";
-    const senderName = message.sender?.handle || message.sender?.id || "unknown";
-
-    return new Message({
-      id: message.id,
-      threadId: this.encodeThreadId({ chatId: message.chatId, isGroup: message.isGroup }),
-      text,
-      formatted: parseMarkdown(text),
-      raw,
-      author: {
-        userId: senderId,
-        userName: senderName,
-        fullName: senderName,
-        isBot: isMe,
-        isMe,
-      },
-      metadata: {
-        dateSent: dateFrom(message.sentAt),
-        edited: message.edited,
-        editedAt: message.editedAt ? dateFrom(message.editedAt) : undefined,
-      },
-      attachments,
-      links,
-    });
-
-    function normalizeMessage(value: LinqRawMessage): {
-      id: string;
-      chatId: string;
-      isGroup?: boolean;
-      parts: LinqMessagePart[];
-      isMe: boolean;
-      sender: LinqAPIV3.ChatHandle | null | undefined;
-      sentAt: string | null | undefined;
-      edited: boolean;
-      editedAt?: string | null;
-    } {
-      if (isMessageEvent(value)) {
-        return {
-          id: value.id,
-          chatId: value.chat.id,
-          isGroup: value.chat.is_group ?? undefined,
-          parts: value.parts,
-          isMe: value.direction === "outbound" || value.sender_handle.is_me === true,
-          sender: value.sender_handle,
-          sentAt: value.sent_at,
-          edited: false,
-        };
-      }
-
-      if (isMessageSendResponse(value)) {
-        return {
-          id: value.message.id,
-          chatId: value.chat_id,
-          isGroup: undefined,
-          parts: value.message.parts,
-          isMe: true,
-          sender: value.message.from_handle,
-          sentAt: value.message.sent_at || value.message.created_at,
-          edited: false,
-        };
-      }
-
-      if (isRetrievedMessage(value)) {
-        const edited = value.updated_at !== value.created_at;
-
-        return {
-          id: value.id,
-          chatId: value.chat_id,
-          isGroup: undefined,
-          parts: value.parts ?? [],
-          isMe: value.is_from_me || value.from_handle?.is_me === true,
-          sender: value.from_handle,
-          sentAt: value.sent_at || value.created_at,
-          edited,
-          editedAt: edited ? value.updated_at : undefined,
-        };
-      }
-
-      throw new NotImplementedError("parseMessage only supports Linq message payloads");
-    }
-
-    function isMessageEvent(value: LinqRawMessage): value is LinqMessageEvent {
-      return isRecord(value) && "chat" in value && "direction" in value && "sender_handle" in value;
-    }
-
-    function isMessageSendResponse(value: LinqRawMessage): value is LinqMessageSendResponse {
-      return isRecord(value) && "chat_id" in value && "message" in value && isRecord(value.message);
-    }
-
-    function isRetrievedMessage(value: LinqRawMessage): value is LinqRetrievedMessage {
-      return (
-        isRecord(value) && "chat_id" in value && "is_from_me" in value && "created_at" in value
-      );
-    }
-
-    function dateFrom(value: string | null | undefined): Date {
-      if (value) {
-        const date = new Date(value);
-
-        if (!Number.isNaN(date.getTime())) {
-          return date;
-        }
-      }
-
-      return new Date();
-    }
-
-    function messageText(parts: LinqMessagePart[], attachments: Attachment[]): string {
-      const textParts = parts.flatMap((part) => {
-        if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
-          return [part.value];
-        }
-
-        return [];
-      });
-      const attachmentSummaries = attachments.map((attachment) => {
-        const label = attachment.name || attachment.mimeType || attachment.type;
-
-        return `[${attachment.type} attachment: ${label}]`;
-      });
-
-      return [...textParts, ...attachmentSummaries].join("\n").trim();
-    }
-
-    function messageLinks(parts: LinqMessagePart[]): LinkPreview[] {
-      const urls = new Set<string>();
-
-      for (const part of parts) {
-        if (part.type === "link") {
-          urls.add(part.value);
-          continue;
-        }
-
-        if (part.type === "text") {
-          for (const url of urlsFromText(part.value)) {
-            urls.add(url);
-          }
-        }
-      }
-
-      return [...urls].map((url) => ({ url }));
-    }
-
-    function toAttachment(part: Extract<LinqMessagePart, { type: "media" }>): Attachment {
-      return {
-        type: attachmentType(part.mime_type),
-        url: part.url,
-        name: part.filename,
-        mimeType: part.mime_type,
-        size: part.size_bytes,
-        width: part.width ?? part.width_px,
-        height: part.height ?? part.height_px,
-        fetchData: async () => {
-          const response = await fetch(part.url);
-
-          if (!response.ok) {
-            throw new Error(
-              `Failed to fetch Linq attachment ${part.id || part.url}: ${response.status}`,
-            );
-          }
-
-          return Buffer.from(await response.arrayBuffer());
-        },
-      };
-    }
-
-    function attachmentType(mimeType: string): Attachment["type"] {
-      if (mimeType.startsWith("image/")) {
-        return "image";
-      }
-
-      if (mimeType.startsWith("video/")) {
-        return "video";
-      }
-
-      if (mimeType.startsWith("audio/")) {
-        return "audio";
-      }
-
-      return "file";
-    }
+    return parseLinqMessage(raw, (platformData) => this.encodeThreadId(platformData));
   }
 
   // Random
@@ -525,62 +307,6 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   isDM(threadId: string): boolean {
     return this.decodeThreadId(threadId).isGroup !== true;
   }
-}
-
-function compareMessages(left: Message<LinqRawMessage>, right: Message<LinqRawMessage>): number {
-  return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
-}
-
-function urlsFromText(text: string): string[] {
-  const matches = text.match(/https?:\/\/[^\s<>()]+/gi) ?? [];
-
-  return matches.map((url) => url.replace(/[.,!?;:]+$/g, ""));
-}
-
-function toLinqReaction(emoji: EmojiValue | string): {
-  type: LinqAPIV3.ReactionType;
-  custom_emoji?: string;
-} {
-  const value = typeof emoji === "string" ? emoji : emoji.name;
-  const normalized = value
-    .trim()
-    .replace(/^\{\{emoji:/, "")
-    .replace(/\}\}$/, "")
-    .replace(/^:+|:+$/g, "")
-    .toLowerCase();
-
-  if (["thumbs_up", "thumbsup", "+1", "like", "👍"].includes(normalized)) {
-    return { type: "like" };
-  }
-
-  if (["thumbs_down", "thumbsdown", "-1", "dislike", "👎"].includes(normalized)) {
-    return { type: "dislike" };
-  }
-
-  if (["heart", "love", "❤️", "❤"].includes(normalized)) {
-    return { type: "love" };
-  }
-
-  if (["laugh", "joy", "rofl", "😂", "🤣"].includes(normalized)) {
-    return { type: "laugh" };
-  }
-
-  if (["exclamation", "emphasize", "!!", "!", "‼️", "‼", "❗"].includes(normalized)) {
-    return { type: "emphasize" };
-  }
-
-  if (["question", "?", "❓"].includes(normalized)) {
-    return { type: "question" };
-  }
-
-  return {
-    type: "custom",
-    custom_emoji: defaultEmojiResolver.toDiscord(value),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 export function createLinqAdapter(config: LinqAdapterConfig) {
