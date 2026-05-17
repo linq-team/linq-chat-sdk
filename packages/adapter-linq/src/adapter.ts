@@ -20,8 +20,24 @@ import { LinqFormatConverter } from "./format-converter.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
-type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"] | LinqMessageSendResponse;
+type LinqRetrievedMessage = LinqAPIV3.Message;
+type LinqRawMessage =
+  | LinqAPIV3.EventsWebhookEvent["data"]
+  | LinqMessageSendResponse
+  | LinqRetrievedMessage;
 type LinqMessageEvent = LinqAPIV3.MessageEventV2;
+type LinqMessagePart =
+  | {
+      type: "text" | "link";
+      value: string;
+    }
+  | {
+      type: "media";
+      url: string;
+      filename: string;
+      mime_type: string;
+      size_bytes: number;
+    };
 
 type LinqThreadId = {
   chatId: string;
@@ -65,12 +81,37 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Messages
-  fetchMessages(_threadId: string, _options?: FetchOptions): Promise<FetchResult<LinqRawMessage>> {
-    throw new NotImplementedError("fetchMessages is not implemented");
+  async fetchMessages(
+    threadId: string,
+    options?: FetchOptions,
+  ): Promise<FetchResult<LinqRawMessage>> {
+    const { chatId } = this.decodeThreadId(threadId);
+    const page = await this.apiClient.chats.messages.list(chatId, {
+      cursor: options?.cursor,
+      limit: options?.limit,
+    });
+
+    return {
+      messages: page.messages.map((message) => this.parseMessage(message)).sort(compareMessages),
+      nextCursor: page.next_cursor || undefined,
+    };
   }
 
-  fetchMessage(_threadId: string, _messageId: string): Promise<Message<LinqRawMessage> | null> {
-    throw new NotImplementedError("fetchMessage is not implemented");
+  async fetchMessage(
+    _threadId: string,
+    messageId: string,
+  ): Promise<Message<LinqRawMessage> | null> {
+    try {
+      const message = await this.apiClient.messages.retrieve(messageId);
+
+      return this.parseMessage(message);
+    } catch (error) {
+      if (isRecord(error) && error.status === 404) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   async postMessage(
@@ -123,8 +164,19 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Threads
-  fetchThread(_threadId: string): Promise<ThreadInfo> {
-    throw new NotImplementedError("fetchThread is not implemented");
+  async fetchThread(threadId: string): Promise<ThreadInfo> {
+    const { chatId } = this.decodeThreadId(threadId);
+    const chat = await this.apiClient.chats.retrieve(chatId);
+
+    return {
+      id: this.encodeThreadId({ chatId: chat.id }),
+      channelId: this.encodeThreadId({ chatId: chat.id }),
+      channelName: chat.display_name ?? undefined,
+      isDM: !chat.is_group,
+      metadata: {
+        chat,
+      },
+    };
   }
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
@@ -196,11 +248,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
-    if (!isMessageEvent(raw)) {
-      throw new NotImplementedError("parseMessage only supports Linq message events");
-    }
+    const message = normalizeMessage(raw);
 
-    const text = raw.parts
+    const text = message.parts
       .flatMap((part) => {
         if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
           return [part.value];
@@ -211,13 +261,13 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       .join("\n")
       .trim();
 
-    const isMe = raw.direction === "outbound" || raw.sender_handle.is_me === true;
-    const senderId = raw.sender_handle.id || raw.sender_handle.handle || "unknown";
-    const senderName = raw.sender_handle.handle || raw.sender_handle.id || "unknown";
+    const isMe = message.isMe;
+    const senderId = message.sender?.id || message.sender?.handle || "unknown";
+    const senderName = message.sender?.handle || message.sender?.id || "unknown";
 
     return new Message({
-      id: raw.id,
-      threadId: this.encodeThreadId({ chatId: raw.chat.id }),
+      id: message.id,
+      threadId: this.encodeThreadId({ chatId: message.chatId }),
       text,
       formatted: parseMarkdown(text),
       raw,
@@ -229,10 +279,10 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         isMe,
       },
       metadata: {
-        dateSent: dateFrom(raw.sent_at),
+        dateSent: dateFrom(message.sentAt),
         edited: false,
       },
-      attachments: raw.parts.flatMap((part): Attachment[] => {
+      attachments: message.parts.flatMap((part): Attachment[] => {
         if (part.type !== "media") {
           return [];
         }
@@ -249,15 +299,61 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       }),
     });
 
+    function normalizeMessage(value: LinqRawMessage): {
+      id: string;
+      chatId: string;
+      parts: LinqMessagePart[];
+      isMe: boolean;
+      sender: LinqAPIV3.ChatHandle | null | undefined;
+      sentAt: string | null | undefined;
+    } {
+      if (isMessageEvent(value)) {
+        return {
+          id: value.id,
+          chatId: value.chat.id,
+          parts: value.parts,
+          isMe: value.direction === "outbound" || value.sender_handle.is_me === true,
+          sender: value.sender_handle,
+          sentAt: value.sent_at,
+        };
+      }
+
+      if (isMessageSendResponse(value)) {
+        return {
+          id: value.message.id,
+          chatId: value.chat_id,
+          parts: value.message.parts,
+          isMe: true,
+          sender: value.message.from_handle,
+          sentAt: value.message.sent_at || value.message.created_at,
+        };
+      }
+
+      if (isRetrievedMessage(value)) {
+        return {
+          id: value.id,
+          chatId: value.chat_id,
+          parts: value.parts ?? [],
+          isMe: value.is_from_me || value.from_handle?.is_me === true,
+          sender: value.from_handle,
+          sentAt: value.sent_at || value.created_at,
+        };
+      }
+
+      throw new NotImplementedError("parseMessage only supports Linq message payloads");
+    }
+
     function isMessageEvent(value: LinqRawMessage): value is LinqMessageEvent {
+      return isRecord(value) && "chat" in value && "direction" in value && "sender_handle" in value;
+    }
+
+    function isMessageSendResponse(value: LinqRawMessage): value is LinqMessageSendResponse {
+      return isRecord(value) && "chat_id" in value && "message" in value && isRecord(value.message);
+    }
+
+    function isRetrievedMessage(value: LinqRawMessage): value is LinqRetrievedMessage {
       return (
-        typeof value === "object" &&
-        value !== null &&
-        "id" in value &&
-        "chat" in value &&
-        "direction" in value &&
-        "parts" in value &&
-        "sender_handle" in value
+        isRecord(value) && "chat_id" in value && "is_from_me" in value && "created_at" in value
       );
     }
 
@@ -302,6 +398,14 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   isDM(_threadId: string): boolean {
     return true;
   }
+}
+
+function compareMessages(left: Message<LinqRawMessage>, right: Message<LinqRawMessage>): number {
+  return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export function createLinqAdapter(config: LinqAdapterConfig) {

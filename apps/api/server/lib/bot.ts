@@ -2,7 +2,7 @@ import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq"
 import { createPostgresState } from "@chat-adapter/state-pg"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { ToolLoopAgent } from "ai"
-import { Chat } from "chat"
+import { Chat, toAiMessages } from "chat"
 import type { Message, Thread } from "chat"
 
 import {
@@ -33,9 +33,9 @@ function createAgent() {
 }
 
 async function postAiReply(thread: Thread, message: Message) {
-  const prompt = message.text.trim()
+  const prompt = await buildPrompt(thread, message)
 
-  if (!prompt) {
+  if (!prompt.length) {
     await thread.post("I can reply to text messages. Send me a message and I'll help.")
     return
   }
@@ -52,6 +52,20 @@ async function postAiReply(thread: Thread, message: Message) {
     await thread.post(result.fullStream)
   } finally {
     clearInterval(typingInterval)
+  }
+}
+
+async function buildPrompt(thread: Thread, message: Message) {
+  try {
+    await thread.refresh()
+
+    const messages = thread.recentMessages.some((recent) => recent.id === message.id)
+      ? thread.recentMessages
+      : [...thread.recentMessages, message]
+
+    return toAiMessages(messages, { includeNames: !thread.isDM })
+  } catch {
+    return toAiMessages(message.text.trim() ? [message] : [])
   }
 }
 
