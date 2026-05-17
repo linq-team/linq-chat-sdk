@@ -1,5 +1,11 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
-import { ConsoleLogger, Message, NotImplementedError, parseMarkdown } from "chat";
+import {
+  ConsoleLogger,
+  Message,
+  NotImplementedError,
+  defaultEmojiResolver,
+  parseMarkdown,
+} from "chat";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -151,16 +157,24 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Reactions
-  addReaction(_threadId: string, _messageId: string, _emoji: EmojiValue | string): Promise<void> {
-    throw new NotImplementedError("addReaction is not implemented");
+  async addReaction(
+    _threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string,
+  ): Promise<void> {
+    await this.apiClient.messages.addReaction(messageId, {
+      operation: "add",
+      ...toLinqReaction(emoji),
+    });
   }
 
-  removeReaction(
-    _threadId: string,
-    _messageId: string,
-    _emoji: EmojiValue | string,
-  ): Promise<void> {
-    throw new NotImplementedError("removeReaction is not implemented");
+  removeReaction(_threadId: string, messageId: string, emoji: EmojiValue | string): Promise<void> {
+    return this.apiClient.messages
+      .addReaction(messageId, {
+        operation: "remove",
+        ...toLinqReaction(emoji),
+      })
+      .then(() => undefined);
   }
 
   // Threads
@@ -402,6 +416,48 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
 function compareMessages(left: Message<LinqRawMessage>, right: Message<LinqRawMessage>): number {
   return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
+}
+
+function toLinqReaction(emoji: EmojiValue | string): {
+  type: LinqAPIV3.ReactionType;
+  custom_emoji?: string;
+} {
+  const value = typeof emoji === "string" ? emoji : emoji.name;
+  const normalized = value
+    .trim()
+    .replace(/^\{\{emoji:/, "")
+    .replace(/\}\}$/, "")
+    .replace(/^:+|:+$/g, "")
+    .toLowerCase();
+
+  if (["thumbs_up", "thumbsup", "+1", "like", "👍"].includes(normalized)) {
+    return { type: "like" };
+  }
+
+  if (["thumbs_down", "thumbsdown", "-1", "dislike", "👎"].includes(normalized)) {
+    return { type: "dislike" };
+  }
+
+  if (["heart", "love", "❤️", "❤"].includes(normalized)) {
+    return { type: "love" };
+  }
+
+  if (["laugh", "joy", "rofl", "😂", "🤣"].includes(normalized)) {
+    return { type: "laugh" };
+  }
+
+  if (["exclamation", "emphasize", "!!", "!", "‼️", "‼", "❗"].includes(normalized)) {
+    return { type: "emphasize" };
+  }
+
+  if (["question", "?", "❓"].includes(normalized)) {
+    return { type: "question" };
+  }
+
+  return {
+    type: "custom",
+    custom_emoji: defaultEmojiResolver.toDiscord(value),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
