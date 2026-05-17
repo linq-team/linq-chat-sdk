@@ -48,6 +48,7 @@ type LinqMessagePart =
 
 type LinqThreadId = {
   chatId: string;
+  isGroup?: boolean;
 };
 
 export interface LinqAdapterConfig {
@@ -79,12 +80,25 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // Thread ID
   encodeThreadId(platformData: LinqThreadId): string {
-    return `linq-${platformData.chatId}`;
+    if (platformData.isGroup === undefined) {
+      return `linq-${platformData.chatId}`;
+    }
+
+    return `linq-${platformData.chatId}-${platformData.isGroup ? "group" : "dm"}`;
   }
 
   decodeThreadId(threadId: string): LinqThreadId {
-    const chatId = threadId.replace("linq-", "");
-    return { chatId };
+    const value = threadId.replace("linq-", "");
+
+    if (value.endsWith("-group")) {
+      return { chatId: value.slice(0, -"-group".length), isGroup: true };
+    }
+
+    if (value.endsWith("-dm")) {
+      return { chatId: value.slice(0, -"-dm".length), isGroup: false };
+    }
+
+    return { chatId: value };
   }
 
   // Messages
@@ -202,8 +216,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     const chat = await this.apiClient.chats.retrieve(chatId);
 
     return {
-      id: this.encodeThreadId({ chatId: chat.id }),
-      channelId: this.encodeThreadId({ chatId: chat.id }),
+      id: this.encodeThreadId({ chatId: chat.id, isGroup: chat.is_group }),
+      channelId: this.encodeThreadId({ chatId: chat.id, isGroup: chat.is_group }),
       channelName: chat.display_name ?? undefined,
       isDM: !chat.is_group,
       metadata: {
@@ -213,10 +227,21 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const { chatId, isGroup } = this.decodeThreadId(threadId);
 
-    // todo: disable in group chat
-    await this.apiClient.chats.typing.start(chatId);
+    if (isGroup === true) {
+      return;
+    }
+
+    try {
+      await this.apiClient.chats.typing.start(chatId);
+    } catch (error) {
+      if (isRecord(error) && error.status === 403) {
+        return;
+      }
+
+      throw error;
+    }
   }
 
   async stream(
@@ -260,6 +285,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
       const threadId = this.encodeThreadId({
         chatId: event.data.chat.id,
+        isGroup: event.data.chat.is_group ?? undefined,
       });
 
       const factory = async (): Promise<Message<unknown>> => {
@@ -300,7 +326,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     return new Message({
       id: message.id,
-      threadId: this.encodeThreadId({ chatId: message.chatId }),
+      threadId: this.encodeThreadId({ chatId: message.chatId, isGroup: message.isGroup }),
       text,
       formatted: parseMarkdown(text),
       raw,
@@ -335,6 +361,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     function normalizeMessage(value: LinqRawMessage): {
       id: string;
       chatId: string;
+      isGroup?: boolean;
       parts: LinqMessagePart[];
       isMe: boolean;
       sender: LinqAPIV3.ChatHandle | null | undefined;
@@ -344,6 +371,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         return {
           id: value.id,
           chatId: value.chat.id,
+          isGroup: value.chat.is_group ?? undefined,
           parts: value.parts,
           isMe: value.direction === "outbound" || value.sender_handle.is_me === true,
           sender: value.sender_handle,
@@ -355,6 +383,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         return {
           id: value.message.id,
           chatId: value.chat_id,
+          isGroup: undefined,
           parts: value.message.parts,
           isMe: true,
           sender: value.message.from_handle,
@@ -366,6 +395,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
         return {
           id: value.id,
           chatId: value.chat_id,
+          isGroup: undefined,
           parts: value.parts ?? [],
           isMe: value.is_from_me || value.from_handle?.is_me === true,
           sender: value.from_handle,
@@ -428,8 +458,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return threadId;
   }
 
-  isDM(_threadId: string): boolean {
-    return true;
+  isDM(threadId: string): boolean {
+    return this.decodeThreadId(threadId).isGroup !== true;
   }
 }
 

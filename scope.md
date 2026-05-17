@@ -4,8 +4,6 @@ This file tracks what is still left in the Linq Chat SDK adapter.
 
 Keep this readable and practical: each item should say what is missing, why it matters, and any Linq-specific caveats.
 
-
-
 ## Current adapter status
 
 The adapter can already handle the core receive/reply path:
@@ -19,13 +17,12 @@ The adapter can already handle the core receive/reply path:
 - Edit text messages with `messages.update()`.
 - Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
+- Cache direct-message vs group-chat metadata in new thread IDs.
+- Detect direct-message vs group-chat threads from encoded metadata.
+- Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
 
-
-
 ## Work still left
-
-
 
 ### 1. Delete messages
 
@@ -39,42 +36,7 @@ Because Chat SDK callers usually expect `deleteMessage()` to remove the visible 
 
 Only implement this if product explicitly accepts the narrower Linq semantics.
 
-
-
-### 2. Direct-message detection
-
-Status: **stubbed**
-
-`fetchThread()` now knows whether a Linq chat is a group chat.
-
-But `isDM(threadId)` still returns `true` for every thread.
-
-Possible fixes:
-
-- Encode `is_group` into the thread ID.
-- Keep a small metadata cache keyed by chat ID.
-- Fetch chat metadata when needed, if the Chat SDK call site can tolerate async work. The current `isDM()` signature is synchronous, so this may not fit.
-
-
-
-### 3. Group-safe typing indicators
-
-Status: **partially implemented**
-
-`startTyping()` calls `chats.typing.start(chatId)`.
-
-Linq rejects typing indicators in group chats with `403`.
-
-The adapter should either:
-
-- avoid calling typing for known group chats, or
-- ignore only the expected group-chat typing failure.
-
-Do not hide unrelated typing errors.
-
-
-
-### 4. Richer inbound message parsing
+### 2. Richer inbound message parsing
 
 Status: **basic but useful**
 
@@ -95,9 +57,7 @@ Still missing:
 - image/video dimensions when available
 - richer media metadata
 
-
-
-### 5. Outbound attachments and media
+### 3. Outbound attachments and media
 
 Status: **not implemented**
 
@@ -111,9 +71,7 @@ Likely areas to check:
 - Linq media part requirements
 - file size and MIME type limits
 
-
-
-### 6. Inbound reaction webhooks
+### 4. Inbound reaction webhooks
 
 Status: **not implemented**
 
@@ -128,9 +86,7 @@ Future support should subscribe to:
 
 Then map those webhooks into `chat.processReaction()`.
 
-
-
-### 7. Opening new direct messages / creating chats
+### 5. Opening new direct messages / creating chats
 
 Status: **not implemented**
 
@@ -142,9 +98,7 @@ Those semantics do not line up cleanly.
 
 This needs a deliberate product/API decision before implementation.
 
-
-
-### 8. Channel and thread listing APIs
+### 6. Channel and thread listing APIs
 
 Status: **not implemented**
 
@@ -152,9 +106,7 @@ Linq does not have the same channel/thread split that platforms like Slack have.
 
 Skip channel-level APIs unless the app needs them later.
 
-
-
-### 9. Native streaming
+### 7. Native streaming
 
 Status: **intentionally not implemented**
 
@@ -165,17 +117,3 @@ The adapter currently buffers stream text and posts once.
 Once `editMessage()` exists, Chat SDK fallback streaming may technically work, but Linq edit limits make long streaming risky.
 
 Use fallback streaming carefully.
-
-
-
-## Suggested next order
-
-1. Make typing indicators group-safe.
-
-2. Improve `isDM()` behavior.
-
-3. Add richer message metadata parsing.
-
-4. Add inbound reaction webhook routing.
-
-5. Add outbound attachment/media support.
