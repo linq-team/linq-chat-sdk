@@ -144,12 +144,28 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     };
   }
 
-  editMessage(
-    _threadId: string,
-    _messageId: string,
-    _message: AdapterPostableMessage,
+  async editMessage(
+    threadId: string,
+    messageId: string,
+    message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    throw new NotImplementedError("editMessage is not implemented");
+    const { chatId } = this.decodeThreadId(threadId);
+    const text = this.converter.renderPostable(message).trim();
+
+    if (!text) {
+      throw new Error("Linq message text cannot be empty.");
+    }
+
+    const response = await this.apiClient.messages.update(messageId, {
+      text,
+      part_index: 0,
+    });
+
+    return {
+      id: response.id,
+      threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
+      raw: response,
+    };
   }
 
   deleteMessage(_threadId: string, _messageId: string): Promise<void> {
