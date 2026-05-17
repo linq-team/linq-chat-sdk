@@ -81,8 +81,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return `linq-${platformData.chatId}`;
   }
 
-  decodeThreadId(_threadId: string): LinqThreadId {
-    const chatId = _threadId.replace("linq-", "");
+  decodeThreadId(threadId: string): LinqThreadId {
+    const chatId = threadId.replace("linq-", "");
     return { chatId };
   }
 
