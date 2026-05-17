@@ -1,6 +1,9 @@
 {
   "name": "@linq-chat-sdk/adapter-linq",
   "version": "0.0.0",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,19 +13,25 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "dev": "tsc --project tsconfig.json --watch",
     "build": "tsc --project tsconfig.json",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt . --write",
+    "format:check": "oxfmt . --check"
   },
-  "peerDependencies": {
-    "chat": "^4.26.0"
+  "dependencies": {
+    "@linqapp/sdk": "^0.22.1"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "chat": "^4.26.0",
+    "oxfmt": "^0.50.0",
+    "oxlint": "^1.65.0"
+  },
+  "peerDependencies": {
     "chat": "^4.26.0"
   }
 }

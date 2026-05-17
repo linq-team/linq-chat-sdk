@@ -1,16 +1,10 @@
+import { APIError, LinqAPIV3 } from "@linqapp/sdk"
 import { HTTPError } from "nitro"
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner"
 
 export const LINQ_API_TOKEN_ENV_NAME = "LINQ_API_TOKEN"
 export const LINQ_WEBHOOK_VERSION = "2026-02-03"
-
-interface LinqApiErrorResponse {
-  error?: {
-    message?: string
-  }
-  message?: string
-}
 
 export interface LinqWebhookSubscription {
   created_at: string
@@ -64,7 +58,7 @@ export function buildLinqWebhookUrl(publicBaseUrl: string): string {
   return webhookUrl.toString()
 }
 
-async function callLinqApi<T>(path: string, init: RequestInit): Promise<T> {
+function createLinqApiClient(): LinqAPIV3 {
   const token = getLinqApiToken()
 
   if (!token) {
@@ -74,47 +68,40 @@ async function callLinqApi<T>(path: string, init: RequestInit): Promise<T> {
     })
   }
 
-  const headers = new Headers(init.headers)
-  headers.set("authorization", `Bearer ${token}`)
-  headers.set("content-type", "application/json")
-
-  const response = await fetch(new URL(path, `${getLinqApiBaseUrl()}/`).toString(), {
-    ...init,
-    headers,
+  return new LinqAPIV3({
+    apiKey: token,
+    baseURL: getLinqApiBaseUrl(),
   })
+}
 
-  const responseText = await response.text()
-  let data: T | LinqApiErrorResponse | null = null
-
-  if (responseText) {
-    try {
-      data = JSON.parse(responseText) as T | LinqApiErrorResponse
-    } catch {
-      throw new HTTPError({
-        status: 502,
-        message: `Linq API request to ${path} returned invalid JSON.`,
-      })
-    }
+function getLinqApiErrorMessage(error: unknown): string {
+  if (error instanceof APIError && error.message) {
+    return error.message
   }
 
-  if (!response.ok || data === null) {
-    const error = data as LinqApiErrorResponse | null
-
-    throw new HTTPError({
-      status: 502,
-      message: error?.error?.message || error?.message || `Linq API request to ${path} failed.`,
-    })
+  if (error instanceof Error && error.message) {
+    return error.message
   }
 
-  return data as T
+  return "Linq API request failed."
 }
 
 export async function createLinqWebhookSubscription(targetUrl: string): Promise<LinqWebhookSubscription> {
-  return callLinqApi<LinqWebhookSubscription>("v3/webhook-subscriptions", {
-    method: "POST",
-    body: JSON.stringify({
+  try {
+    const subscription = await createLinqApiClient().webhookSubscriptions.create({
       target_url: targetUrl,
       subscribed_events: ["message.received"],
-    }),
-  })
+    })
+
+    return subscription as unknown as LinqWebhookSubscription
+  } catch (error) {
+    if (error instanceof HTTPError) {
+      throw error
+    }
+
+    throw new HTTPError({
+      status: 502,
+      message: getLinqApiErrorMessage(error),
+    })
+  }
 }

@@ -19,6 +19,7 @@
     "@chat-adapter/state-pg": "^4.26.0",
     "@chat-adapter/telegram": "^4.26.0",
     "@linq-chat-sdk/adapter-linq": "workspace:*",
+    "@linqapp/sdk": "^0.22.1",
     "chat": "^4.26.0",
     "pg": "^8.20.0"
   }

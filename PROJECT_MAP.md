@@ -18,7 +18,7 @@ Quick notes for me. Goal: make a real Chat SDK adapter for Linq. The Nitro app i
 
 ### Linq setup path
 
-- `apps/api/server/lib/linq-api.ts` — Linq API helper + webhook subscription creation.
+- `apps/api/server/lib/linq-api.ts` — Linq SDK client + webhook subscription creation.
 - `apps/api/server/api/linq/setup/webhook.post.ts` — creates Linq `message.received` subscription + stores signing secret.
 - `apps/api/server/api/webhooks/linq.post.ts` — thin handoff to `bot.webhooks.linq`.
 
@@ -28,14 +28,17 @@ Quick notes for me. Goal: make a real Chat SDK adapter for Linq. The Nitro app i
 
 Everything in `packages/adapter-linq` matters.
 
-- `packages/adapter-linq/src/index.ts` — Linq adapter: verifies webhooks, maps inbound text, sends text replies.
+- `packages/adapter-linq/src/index.ts` — public exports only.
+- `packages/adapter-linq/src/adapter.ts` — Chat SDK adapter: maps inbound text, sends text replies.
+- `packages/adapter-linq/src/format-converter.ts` — tiny Chat SDK format converter.
+- `packages/adapter-linq/src/verification.ts` — Linq webhook timestamp/signature verification.
 - `packages/adapter-linq/package.json` — package/export shape.
 - `packages/adapter-linq/tsconfig.json` — adapter build config.
 
 ### App integration
 
 - `apps/api/server/lib/bot.ts` — Chat SDK instance + handlers. Linq adapter gets mounted here.
-- `apps/api/server/api/webhooks/linq.post.ts` — thin Linq webhook route.
+- `apps/api/server/api/webhooks/linq.post.ts` — Linq webhook route + raw event storage.
 - `apps/api/server/lib/linq-api.ts` — Linq setup/subscription helper.
 - `apps/api/server/lib/database.ts` — secrets/state/raw webhook storage.
 - `apps/api/index.html` — setup UI.
@@ -59,15 +62,18 @@ Done:
 - Postgres state/settings exist.
 - Linq webhook subscription setup exists.
 - Linq adapter exists.
-- Linq signature verification lives in the adapter.
+- Linq API calls use `@linqapp/sdk`.
+- Linq signature verification lives in the adapter package.
 - Linq inbound text maps into Chat SDK messages.
 - Linq `thread.post(...)` can send plain text to existing chats.
+- Raw Linq webhook event storage lives in the app route, not the adapter.
+- Linq typing-start calls the SDK.
 - Linq is mounted in `bot.ts`.
 
 Not done:
 
-- Attachments/reactions/typing/editing.
-- Full message history fetch from Linq API.
+- Attachments/reactions/typing-stop/editing.
+- Message history fetch from Linq API.
 - Real payload fixtures/tests.
 
 ## Next step

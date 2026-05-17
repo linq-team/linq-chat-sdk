@@ -4,12 +4,9 @@ import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 
 import {
-  getLinqWebhookSecret,
   getPostgresPool,
   getTelegramWebhookSecret,
-  storeLinqWebhookEvent,
 } from "./database"
-import { getLinqApiBaseUrl, getLinqApiToken } from "./linq-api"
 
 let bot: Chat<{
   linq: ReturnType<typeof createLinqAdapter>
@@ -33,15 +30,7 @@ function buildReply(text: string): string {
 async function createBot() {
   const telegramSecret = await getTelegramWebhookSecret()
   const telegram = createTelegramAdapter({ mode: "webhook", secretToken: telegramSecret ?? undefined })
-  const linq = createLinqAdapter({
-    apiBaseUrl: getLinqApiBaseUrl(),
-    apiToken: getLinqApiToken,
-    getSigningSecret: getLinqWebhookSecret,
-    onWebhookEvent: async (record) => {
-      await storeLinqWebhookEvent(record)
-    },
-    userName: process.env.LINQ_BOT_USERNAME?.trim() || process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
-  })
+  const linq = createLinqAdapter()
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
@@ -63,6 +52,7 @@ async function createBot() {
   chat.onDirectMessage(async (thread, message) => {
     await thread.subscribe()
     await thread.post(buildReply(message.text))
+    // message.
   })
 
   chat.onNewMention(async (thread, message) => {
