@@ -16,6 +16,7 @@ import type {
   FetchOptions,
   FetchResult,
   FormattedContent,
+  LinkPreview,
   Logger,
   RawMessage,
   StreamChunk,
@@ -40,10 +41,15 @@ type LinqMessagePart =
     }
   | {
       type: "media";
+      id?: string;
       url: string;
       filename: string;
       mime_type: string;
       size_bytes: number;
+      width?: number;
+      height?: number;
+      width_px?: number;
+      height_px?: number;
     };
 
 type LinqThreadId = {
@@ -308,17 +314,15 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
     const message = normalizeMessage(raw);
-
-    const text = message.parts
-      .flatMap((part) => {
-        if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
-          return [part.value];
-        }
-
+    const attachments = message.parts.flatMap((part): Attachment[] => {
+      if (part.type !== "media") {
         return [];
-      })
-      .join("\n")
-      .trim();
+      }
+
+      return [toAttachment(part)];
+    });
+    const text = messageText(message.parts, attachments);
+    const links = messageLinks(message.parts);
 
     const isMe = message.isMe;
     const senderId = message.sender?.id || message.sender?.handle || "unknown";
@@ -339,23 +343,11 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       },
       metadata: {
         dateSent: dateFrom(message.sentAt),
-        edited: false,
+        edited: message.edited,
+        editedAt: message.editedAt ? dateFrom(message.editedAt) : undefined,
       },
-      attachments: message.parts.flatMap((part): Attachment[] => {
-        if (part.type !== "media") {
-          return [];
-        }
-
-        return [
-          {
-            type: attachmentType(part.mime_type),
-            url: part.url,
-            name: part.filename,
-            mimeType: part.mime_type,
-            size: part.size_bytes,
-          },
-        ];
-      }),
+      attachments,
+      links,
     });
 
     function normalizeMessage(value: LinqRawMessage): {
@@ -366,6 +358,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       isMe: boolean;
       sender: LinqAPIV3.ChatHandle | null | undefined;
       sentAt: string | null | undefined;
+      edited: boolean;
+      editedAt?: string | null;
     } {
       if (isMessageEvent(value)) {
         return {
@@ -376,6 +370,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           isMe: value.direction === "outbound" || value.sender_handle.is_me === true,
           sender: value.sender_handle,
           sentAt: value.sent_at,
+          edited: false,
         };
       }
 
@@ -388,10 +383,13 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           isMe: true,
           sender: value.message.from_handle,
           sentAt: value.message.sent_at || value.message.created_at,
+          edited: false,
         };
       }
 
       if (isRetrievedMessage(value)) {
+        const edited = value.updated_at !== value.created_at;
+
         return {
           id: value.id,
           chatId: value.chat_id,
@@ -400,6 +398,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
           isMe: value.is_from_me || value.from_handle?.is_me === true,
           sender: value.from_handle,
           sentAt: value.sent_at || value.created_at,
+          edited,
+          editedAt: edited ? value.updated_at : undefined,
         };
       }
 
@@ -430,6 +430,65 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       }
 
       return new Date();
+    }
+
+    function messageText(parts: LinqMessagePart[], attachments: Attachment[]): string {
+      const textParts = parts.flatMap((part) => {
+        if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
+          return [part.value];
+        }
+
+        return [];
+      });
+      const attachmentSummaries = attachments.map((attachment) => {
+        const label = attachment.name || attachment.mimeType || attachment.type;
+
+        return `[${attachment.type} attachment: ${label}]`;
+      });
+
+      return [...textParts, ...attachmentSummaries].join("\n").trim();
+    }
+
+    function messageLinks(parts: LinqMessagePart[]): LinkPreview[] {
+      const urls = new Set<string>();
+
+      for (const part of parts) {
+        if (part.type === "link") {
+          urls.add(part.value);
+          continue;
+        }
+
+        if (part.type === "text") {
+          for (const url of urlsFromText(part.value)) {
+            urls.add(url);
+          }
+        }
+      }
+
+      return [...urls].map((url) => ({ url }));
+    }
+
+    function toAttachment(part: Extract<LinqMessagePart, { type: "media" }>): Attachment {
+      return {
+        type: attachmentType(part.mime_type),
+        url: part.url,
+        name: part.filename,
+        mimeType: part.mime_type,
+        size: part.size_bytes,
+        width: part.width ?? part.width_px,
+        height: part.height ?? part.height_px,
+        fetchData: async () => {
+          const response = await fetch(part.url);
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch Linq attachment ${part.id || part.url}: ${response.status}`,
+            );
+          }
+
+          return Buffer.from(await response.arrayBuffer());
+        },
+      };
     }
 
     function attachmentType(mimeType: string): Attachment["type"] {
@@ -465,6 +524,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
 function compareMessages(left: Message<LinqRawMessage>, right: Message<LinqRawMessage>): number {
   return left.metadata.dateSent.getTime() - right.metadata.dateSent.getTime();
+}
+
+function urlsFromText(text: string): string[] {
+  const matches = text.match(/https?:\/\/[^\s<>()]+/gi) ?? [];
+
+  return matches.map((url) => url.replace(/[.,!?;:]+$/g, ""));
 }
 
 function toLinqReaction(emoji: EmojiValue | string): {

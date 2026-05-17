@@ -31,19 +31,20 @@ Status: **basic but useful**
 Current parsing handles:
 
 - text parts
-- link parts as text
-- media parts as Chat SDK attachments
+- URLs in text as Chat SDK links
+- link parts as text and Chat SDK links
+- media-only messages with useful attachment summary text
+- media parts as Chat SDK attachments with downloadable data
 - sender identity
 - basic sent timestamp
+- edited metadata when using retrieved/listed message payloads
 
 Still missing:
 
-- edited metadata
-- delivered/read status
-- link previews as `links`
+- edited metadata from edit webhooks, if we subscribe to them later
+- delivered/read status in a normalized Chat SDK surface
 - reactions on inbound message parts
-- image/video dimensions when available
-- richer media metadata
+- richer link preview metadata beyond the URL
 
 ### 2. Outbound attachments and media
 

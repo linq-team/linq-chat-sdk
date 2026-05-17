@@ -128,7 +128,11 @@ async function postAiReply(thread: Thread, message: Message) {
   try {
     await sleep(INITIAL_TYPING_PAUSE_MS);
     const result = await createAgent(thread, context).stream({ prompt: context.prompt });
-    await thread.post(stripMessageIdLabels(result.textStream));
+    const reply = await collectSanitizedText(result.textStream);
+
+    if (reply.trim()) {
+      await thread.post({ markdown: reply });
+    }
   } finally {
     clearInterval(typingInterval);
   }
@@ -164,10 +168,14 @@ function latestAssistantMessageId(messages: Message[]) {
   return messages.findLast((message) => message.author.isMe)?.id;
 }
 
-async function* stripMessageIdLabels(stream: AsyncIterable<string>) {
+async function collectSanitizedText(stream: AsyncIterable<string>) {
+  let text = "";
+
   for await (const chunk of stream) {
-    yield stripMessageIdLabelsFromText(chunk);
+    text += stripMessageIdLabelsFromText(chunk);
   }
+
+  return text;
 }
 
 function stripMessageIdLabelsFromText(text: string) {

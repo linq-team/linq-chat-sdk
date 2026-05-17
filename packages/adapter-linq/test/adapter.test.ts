@@ -80,6 +80,45 @@ describe("LinqAdapter.parseMessage", () => {
     expect(message.metadata.dateSent.toISOString()).toBe("2026-05-08T16:21:12.499Z");
     expect(message.metadata.edited).toBe(false);
     expect(message.attachments).toEqual([]);
+    expect(message.links).toEqual([]);
+  });
+
+  it("normalizes URLs in text as links", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    payload.data.parts = [
+      {
+        type: "text",
+        value: "check this out https://example.com and https://trybehold.com.",
+        text_decorations: null,
+      },
+    ];
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("check this out https://example.com and https://trybehold.com.");
+    expect(message.links).toEqual([
+      { url: "https://example.com" },
+      { url: "https://trybehold.com" },
+    ]);
+  });
+
+  it("normalizes link parts as text and links", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    payload.data.parts = [
+      {
+        type: "link",
+        value: "https://example.com",
+      },
+    ];
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("https://example.com");
+    expect(message.links).toEqual([{ url: "https://example.com" }]);
   });
 
   it("normalizes media parts as attachments", () => {
@@ -99,16 +138,60 @@ describe("LinqAdapter.parseMessage", () => {
 
     const message = adapter.parseMessage(payload.data);
 
-    expect(message.text).toBe("");
-    expect(message.attachments).toEqual([
-      {
-        type: "image",
-        url: "https://cdn.linqapp.com/attachments/test/IMG_3389.png",
-        name: "IMG_3389.png",
-        mimeType: "image/png",
-        size: 58500,
+    expect(message.text).toBe("[image attachment: IMG_3389.png]");
+    expect(message.attachments).toHaveLength(1);
+    expect(message.attachments[0]).toMatchObject({
+      type: "image",
+      url: "https://cdn.linqapp.com/attachments/test/IMG_3389.png",
+      name: "IMG_3389.png",
+      mimeType: "image/png",
+      size: 58500,
+    });
+    expect(message.attachments[0]?.fetchData).toEqual(expect.any(Function));
+  });
+
+  it("preserves Linq reply metadata on raw messages", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    payload.data.reply_to = {
+      message_id: "9135965d-42ed-43bc-a1f5-793426b1aefd",
+      part_index: 0,
+    };
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("hi");
+    expect(message.raw.reply_to).toEqual({
+      message_id: "9135965d-42ed-43bc-a1f5-793426b1aefd",
+      part_index: 0,
+    });
+  });
+
+  it("marks retrieved messages as edited when updated_at differs from created_at", () => {
+    const adapter = createTestAdapter();
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+
+    const message = adapter.parseMessage({
+      id: "retrieved-message-id",
+      chat_id: "chat-123",
+      created_at: "2026-05-08T16:21:12.499Z",
+      updated_at: "2026-05-08T16:22:12.499Z",
+      is_delivered: true,
+      is_from_me: false,
+      is_read: true,
+      parts: [{ type: "text", value: "edited text", reactions: null }],
+      from_handle: {
+        id: "user-id",
+        handle: "+15550002000",
+        joined_at: "2026-04-17T17:26:38.725846Z",
+        service: "iMessage",
       },
-    ]);
+    });
+
+    expect(message.text).toBe("edited text");
+    expect(message.metadata.edited).toBe(true);
+    expect(message.metadata.editedAt?.toISOString()).toBe("2026-05-08T16:22:12.499Z");
   });
 });
 
@@ -187,6 +270,34 @@ describe("LinqAdapter.startTyping", () => {
 
     expect(start).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
   });
+
+  it("skips typing indicators for known group chats", async () => {
+    const adapter = createTestAdapter();
+    const start = vi.fn().mockResolvedValue(undefined);
+    (
+      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
+    ).apiClient = {
+      chats: { typing: { start } },
+    };
+
+    await adapter.startTyping("linq-3caaf1a0-ef9f-46e0-8c22-31e82c8514dc-group");
+
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("ignores Linq's group-chat typing rejection", async () => {
+    const adapter = createTestAdapter();
+    const start = vi.fn().mockRejectedValue({ status: 403 });
+    (
+      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
+    ).apiClient = {
+      chats: { typing: { start } },
+    };
+
+    await expect(
+      adapter.startTyping("linq-3caaf1a0-ef9f-46e0-8c22-31e82c8514dc"),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("LinqAdapter.stream", () => {
@@ -230,6 +341,13 @@ describe("LinqAdapter.isDM", () => {
     const adapter = createTestAdapter();
 
     expect(adapter.isDM("linq-chat-123")).toBe(true);
+  });
+
+  it("detects group chats from encoded thread IDs", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.isDM("linq-chat-123-group")).toBe(false);
+    expect(adapter.isDM("linq-chat-123-dm")).toBe(true);
   });
 });
 
