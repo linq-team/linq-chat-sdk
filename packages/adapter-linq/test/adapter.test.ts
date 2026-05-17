@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import type { ChatInstance } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
-import { createLinqAdapter } from "../src/adapter.js";
+import { createLinqAdapter } from "../src/adapter";
 
 const SIGNING_SECRET = "test_linq_webhook_secret";
 const API_KEY = "test_linq_api_key";

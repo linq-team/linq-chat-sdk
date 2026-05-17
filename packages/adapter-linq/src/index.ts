@@ -1,1 +1,1 @@
-export { createLinqAdapter } from "./adapter.js";
+export { createLinqAdapter } from "./adapter";

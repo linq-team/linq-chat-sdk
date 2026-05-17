@@ -15,8 +15,8 @@ import type {
   WebhookOptions,
 } from "chat";
 
-import { LinqFormatConverter } from "./format-converter.js";
-import { verifyLinqWebhookRequest } from "./verification.js";
+import { LinqFormatConverter } from "./format-converter";
+import { verifyLinqWebhookRequest } from "./verification";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
 type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"] | LinqMessageSendResponse;
