@@ -170,6 +170,22 @@ describe("LinqAdapter.postMessage", () => {
   });
 });
 
+describe("LinqAdapter.channelIdFromThreadId", () => {
+  it("uses the Linq thread ID as the channel ID", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.channelIdFromThreadId("linq-chat-123")).toBe("linq-chat-123");
+  });
+});
+
+describe("LinqAdapter.isDM", () => {
+  it("treats Linq chat threads as DMs", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.isDM("linq-chat-123")).toBe(true);
+  });
+});
+
 function createTestAdapter() {
   return createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
 }

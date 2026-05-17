@@ -15,8 +15,8 @@ import type {
   WebhookOptions,
 } from "chat";
 
-import { LinqFormatConverter } from "./format-converter";
-import { verifyLinqWebhookRequest } from "./verification";
+import { LinqFormatConverter } from "./format-converter.js";
+import { verifyLinqWebhookRequest } from "./verification.js";
 
 type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
 type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"] | LinqMessageSendResponse;
@@ -271,8 +271,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     throw new NotImplementedError("renderFormatted is not implemented");
   }
 
-  channelIdFromThreadId(_threadId: string): string {
-    throw new NotImplementedError("channelIdFromThreadId is not implemented");
+  channelIdFromThreadId(threadId: string): string {
+    return threadId;
+  }
+
+  isDM(_threadId: string): boolean {
+    return true;
   }
 }
 
