@@ -47,12 +47,13 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Thread ID
-  encodeThreadId(_platformData: LinqThreadId): string {
-    throw new NotImplementedError("encodeThreadId is not implemented");
+  encodeThreadId(platformData: LinqThreadId): string {
+    return `linq-${platformData.chatId}`;
   }
 
   decodeThreadId(_threadId: string): LinqThreadId {
-    throw new NotImplementedError("decodeThreadId is not implemented");
+    const chatId = _threadId.replace("linq-", "");
+    return { chatId };
   }
 
   // Messages
