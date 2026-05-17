@@ -35,12 +35,25 @@ Current parsing handles:
 - link parts as text and Chat SDK links
 - media-only messages with useful attachment summary text
 - media parts as Chat SDK attachments with downloadable data
+- Linq reply metadata preserved on `message.raw.reply_to`
 - sender identity
 - basic sent timestamp
 - edited metadata when using retrieved/listed message payloads
 
+Covered by adapter tests:
+
+- text message parsing
+- URL extraction from text
+- link part parsing
+- media attachment parsing
+- reply metadata preservation
+- edited metadata on retrieved/listed messages
+- direct-message/group thread ID detection
+- group-safe typing indicators
+
 Still missing:
 
+- first-class normalized reply/thread metadata beyond `message.raw.reply_to`
 - edited metadata from edit webhooks, if we subscribe to them later
 - delivered/read status in a normalized Chat SDK surface
 - reactions on inbound message parts
