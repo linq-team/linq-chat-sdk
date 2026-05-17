@@ -18,6 +18,7 @@
   "dependencies": {
     "@chat-adapter/state-pg": "^4.26.0",
     "@chat-adapter/telegram": "^4.26.0",
+    "@chat-adapter/whatsapp": "^4.26.0",
     "@linq-chat-sdk/adapter-linq": "workspace:*",
     "@linqapp/sdk": "^0.22.1",
     "ai": "^6.0.184",

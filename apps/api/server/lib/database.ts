@@ -5,6 +5,8 @@ const LINQ_WEBHOOK_EVENTS_TABLE = "linq_webhook_events"
 const LINQ_WEBHOOK_SECRET_KEY = "linq_webhook_secret"
 const LINQ_WEBHOOK_SUBSCRIPTION_ID_KEY = "linq_webhook_subscription_id"
 const TELEGRAM_WEBHOOK_SECRET_KEY = "telegram_webhook_secret"
+const CHAT_STATE_KEY_PREFIX = "linq-chat-sdk"
+const MESSAGE_HISTORY_PREFIX = "msg-history:"
 
 let pool: pg.Pool | undefined
 
@@ -20,6 +22,16 @@ export interface StoreLinqWebhookEventInput {
   headers: Record<string, string>
   payload: unknown
   subscriptionId: string | null
+}
+
+export interface ChatThreadSummaryRecord {
+  id: string
+  latestMessage: {
+    authorName: string | null
+    dateSent: string | null
+    text: string
+  } | null
+  messageCount: number
 }
 
 function getDatabaseUrl(): string | null {
@@ -66,6 +78,15 @@ export async function ensureLinqWebhookEventsTable(): Promise<void> {
       received_at timestamptz NOT NULL DEFAULT now()
     )
   `)
+}
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const result = await getPostgresPool().query<{ exists: boolean }>(
+    `SELECT to_regclass($1) IS NOT NULL AS exists`,
+    [tableName],
+  )
+
+  return result.rows[0]?.exists === true
 }
 
 export async function getAppSettingRecord(key: string): Promise<AppSettingRecord | null> {
@@ -188,4 +209,135 @@ export async function storeLinqWebhookEvent(input: StoreLinqWebhookEventInput): 
   )
 
   return (result.rowCount ?? 0) > 0
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function getStringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key]
+  return typeof value === "string" ? value : null
+}
+
+function summarizeMessage(value: string): ChatThreadSummaryRecord["latestMessage"] {
+  const parsed = parseJson(value)
+
+  if (!isRecord(parsed)) {
+    return null
+  }
+
+  const author = isRecord(parsed.author) ? parsed.author : null
+  const metadata = isRecord(parsed.metadata) ? parsed.metadata : null
+
+  return {
+    authorName: author ? getStringField(author, "name") : null,
+    dateSent: metadata ? getStringField(metadata, "dateSent") : null,
+    text: getStringField(parsed, "text") ?? "",
+  }
+}
+
+export async function listChatThreads(limit = 50): Promise<ChatThreadSummaryRecord[]> {
+  const hasHistoryTable = await tableExists("chat_state_lists")
+  const hasSubscriptionsTable = await tableExists("chat_state_subscriptions")
+  const threads = new Map<string, ChatThreadSummaryRecord>()
+
+  if (!hasHistoryTable && !hasSubscriptionsTable) {
+    return []
+  }
+
+  if (hasHistoryTable) {
+    const historyResult = await getPostgresPool().query<{
+      list_key: string
+      message_count: string
+      latest_value: string
+    }>(
+      `
+        SELECT
+          list_key,
+          count(*)::text AS message_count,
+          (array_agg(value ORDER BY seq DESC))[1] AS latest_value
+        FROM chat_state_lists
+        WHERE key_prefix = $1
+          AND list_key LIKE $2
+          AND (expires_at IS NULL OR expires_at > now())
+        GROUP BY list_key
+        ORDER BY max(seq) DESC
+        LIMIT $3
+      `,
+      [CHAT_STATE_KEY_PREFIX, `${MESSAGE_HISTORY_PREFIX}%`, limit],
+    )
+
+    for (const row of historyResult.rows) {
+      const id = row.list_key.slice(MESSAGE_HISTORY_PREFIX.length)
+
+      threads.set(id, {
+        id,
+        latestMessage: summarizeMessage(row.latest_value),
+        messageCount: Number(row.message_count),
+      })
+    }
+  }
+
+  if (hasSubscriptionsTable && threads.size < limit) {
+    const subscriptionResult = await getPostgresPool().query<{
+      thread_id: string
+    }>(
+      `
+        SELECT thread_id
+        FROM chat_state_subscriptions
+        WHERE key_prefix = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [CHAT_STATE_KEY_PREFIX, limit],
+    )
+
+    for (const row of subscriptionResult.rows) {
+      if (threads.size >= limit) {
+        break
+      }
+
+      if (threads.has(row.thread_id)) {
+        continue
+      }
+
+      threads.set(row.thread_id, {
+        id: row.thread_id,
+        latestMessage: null,
+        messageCount: 0,
+      })
+    }
+  }
+
+  return [...threads.values()]
+}
+
+export async function getChatThreadMessages(threadId: string, limit = 20): Promise<unknown[]> {
+  if (!await tableExists("chat_state_lists")) {
+    return []
+  }
+
+  const result = await getPostgresPool().query<{ value: string }>(
+    `
+      SELECT value
+      FROM chat_state_lists
+      WHERE key_prefix = $1
+        AND list_key = $2
+        AND (expires_at IS NULL OR expires_at > now())
+      ORDER BY seq DESC
+      LIMIT $3
+    `,
+    [CHAT_STATE_KEY_PREFIX, `${MESSAGE_HISTORY_PREFIX}${threadId}`, limit],
+  )
+
+  return result.rows.reverse().map((row) => parseJson(row.value))
 }

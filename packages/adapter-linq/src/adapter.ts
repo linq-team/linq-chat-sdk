@@ -66,6 +66,7 @@ export interface LinqAdapterConfig {
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
+  readonly persistMessageHistory = true;
   private readonly apiClient: LinqAPIV3;
   private readonly converter = new LinqFormatConverter();
   private readonly signingSecret: string;

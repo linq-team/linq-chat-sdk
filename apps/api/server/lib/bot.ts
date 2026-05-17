@@ -1,18 +1,25 @@
 import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq";
 import { createPostgresState } from "@chat-adapter/state-pg";
 import { createTelegramAdapter } from "@chat-adapter/telegram";
+import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";
 import { ToolLoopAgent, tool } from "ai";
 import { Chat, toAiMessages } from "chat";
 import type { Message, Thread } from "chat";
 import { z } from "zod";
 
-import { getLinqWebhookSecret, getPostgresPool, getTelegramWebhookSecret } from "./database";
+import {
+  getChatThreadMessages,
+  getLinqWebhookSecret,
+  getPostgresPool,
+  getTelegramWebhookSecret,
+} from "./database";
 import { getLinqApiBaseUrl, getLinqApiToken } from "./linq-api";
 
 let bot:
   | Chat<{
       linq: ReturnType<typeof createLinqAdapter>;
       telegram: ReturnType<typeof createTelegramAdapter>;
+      whatsapp: ReturnType<typeof createWhatsAppAdapter>;
     }>
   | undefined;
 
@@ -112,6 +119,8 @@ function createChatTools(thread: Thread, context: PromptContext) {
 }
 
 async function postAiReply(thread: Thread, message: Message) {
+  await markMessageReadIfSupported(thread, message);
+
   const context = await buildPromptContext(thread, message);
 
   if (!context.prompt.length) {
@@ -209,6 +218,54 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function markMessageReadIfSupported(thread: Thread, message: Message) {
+  const markAsRead = (thread.adapter as { markAsRead?: unknown }).markAsRead;
+
+  if (typeof markAsRead !== "function") {
+    return;
+  }
+
+  try {
+    await markAsRead.call(thread.adapter, message.id);
+  } catch (error) {
+    console.warn("Failed to mark chat message as read", error);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function threadMessageText(message: unknown) {
+  if (!isRecord(message)) {
+    return "";
+  }
+
+  const author = isRecord(message.author) ? message.author : null;
+  const authorName = typeof author?.name === "string" ? author.name : "Someone";
+  const text = typeof message.text === "string" ? message.text.trim() : "";
+
+  return text ? `${authorName}: ${text}` : "";
+}
+
+async function generateFunOutboundMessage(threadId: string) {
+  const recentMessages = await getChatThreadMessages(threadId, 12);
+  const transcript = recentMessages.map(threadMessageText).filter(Boolean).join("\n");
+  const prompt = [
+    "Write one short, fun outbound chat message from the bot.",
+    "It can riff on the recent conversation or be a playful unrelated surprise.",
+    "Keep it casual, friendly, and under 280 characters. Do not mention that this was triggered by an admin button.",
+    transcript ? `Recent conversation:\n${transcript}` : "No recent conversation was available, so send a fun standalone note.",
+  ].join("\n\n");
+  const result = await new ToolLoopAgent({
+    model: AI_MODEL,
+    instructions: "You write concise, playful chat messages. Return only the message text.",
+  }).stream({ prompt });
+  const reply = await collectSanitizedText(result.textStream);
+
+  return reply.trim() || "Tiny chaos check-in: hope your day is being at least 17% more delightful than expected ✨";
+}
+
 async function createBot() {
   const telegramSecret = await getTelegramWebhookSecret();
   const telegram = createTelegramAdapter({
@@ -221,12 +278,14 @@ async function createBot() {
     baseURL: getLinqApiBaseUrl(),
     signingSecret: linqSigningSecret ?? "",
   });
+  const whatsapp = createWhatsAppAdapter();
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
     adapters: {
       linq,
       telegram,
+      whatsapp,
     },
     state: createPostgresState({
       client: getPostgresPool(),
@@ -262,4 +321,18 @@ export async function getBot() {
   }
 
   return bot;
+}
+
+export async function sendFunMessageToThread(threadId: string) {
+  const chat = await getBot();
+  await chat.initialize();
+
+  const message = await generateFunOutboundMessage(threadId);
+  const sent = await chat.channel(threadId).post({ markdown: message });
+
+  return {
+    message,
+    sentMessageId: sent.id,
+    threadId,
+  };
 }

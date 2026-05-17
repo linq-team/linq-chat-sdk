@@ -144,6 +144,11 @@ h2 {
   gap: 6px;
 }
 
+.split-heading {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -253,6 +258,43 @@ button:disabled {
   gap: 12px;
 }
 
+.thread-list {
+  display: grid;
+  gap: 12px;
+}
+
+.thread-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.thread-details {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.thread-details strong,
+.thread-preview {
+  overflow-wrap: anywhere;
+}
+
+.thread-preview {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hidden {
+  display: none;
+}
+
 .status-card {
   display: flex;
   justify-content: space-between;
@@ -341,8 +383,14 @@ pre.api {
   }
 
   .grid,
-  .detail-list {
+  .detail-list,
+  .split-heading {
     grid-template-columns: 1fr;
+  }
+
+  .thread-card {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .hero,

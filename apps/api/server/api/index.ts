@@ -10,6 +10,9 @@ export default defineHandler(() => {
         setupStatus: "/api/telegram/setup/status",
         setupWebhook: "/api/telegram/setup/webhook",
       },
+      whatsapp: {
+        webhook: "/api/webhooks/whatsapp",
+      },
       linq: {
         webhook: "/api/webhooks/linq?version=2026-02-03",
         setupWebhook: "/api/linq/setup/webhook",
