@@ -24,19 +24,7 @@ The adapter can already handle the core receive/reply path:
 
 ## Work still left
 
-### 1. Delete messages
-
-Status: **intentionally not implemented**
-
-Linq's delete endpoint only deletes the message from the Linq API.
-
-It does **not** unsend or remove the message from the recipient's chat.
-
-Because Chat SDK callers usually expect `deleteMessage()` to remove the visible chat message, implementing this directly would be misleading.
-
-Only implement this if product explicitly accepts the narrower Linq semantics.
-
-### 2. Richer inbound message parsing
+### 1. Richer inbound message parsing
 
 Status: **basic but useful**
 
@@ -57,7 +45,7 @@ Still missing:
 - image/video dimensions when available
 - richer media metadata
 
-### 3. Outbound attachments and media
+### 2. Outbound attachments and media
 
 Status: **not implemented**
 
@@ -71,7 +59,7 @@ Likely areas to check:
 - Linq media part requirements
 - file size and MIME type limits
 
-### 4. Inbound reaction webhooks
+### 3. Inbound reaction webhooks
 
 Status: **not implemented**
 
@@ -86,7 +74,7 @@ Future support should subscribe to:
 
 Then map those webhooks into `chat.processReaction()`.
 
-### 5. Opening new direct messages / creating chats
+### 4. Opening new direct messages / creating chats
 
 Status: **not implemented**
 
@@ -98,22 +86,54 @@ Those semantics do not line up cleanly.
 
 This needs a deliberate product/API decision before implementation.
 
-### 6. Channel and thread listing APIs
+## Will not implement
 
-Status: **not implemented**
+These are intentional adapter boundaries, not backlog items.
 
-Linq does not have the same channel/thread split that platforms like Slack have.
 
-Skip channel-level APIs unless the app needs them later.
 
-### 7. Native streaming
+### Delete messages
 
-Status: **intentionally not implemented**
+Linq's delete endpoint only deletes the message from the Linq API.
+
+It does **not** unsend or remove the message from the recipient's chat.
+
+Because Chat SDK callers usually expect `deleteMessage()` to remove the visible chat message, implementing this directly would be misleading.
+
+Only revisit if product explicitly accepts the narrower Linq semantics.
+
+
+
+### Native streaming
 
 Linq does not have native streaming message support.
 
-The adapter currently buffers stream text and posts once.
+The adapter should keep buffering stream text and posting once.
 
-Once `editMessage()` exists, Chat SDK fallback streaming may technically work, but Linq edit limits make long streaming risky.
+Chat SDK fallback streaming via edits is technically possible now that `editMessage()` exists, but Linq edit limits make long streaming risky.
 
-Use fallback streaming carefully.
+Do not turn fallback streaming on by default.
+
+
+
+### Channel and thread listing APIs
+
+Linq does not have the same channel/thread split that platforms like Slack have.
+
+Do not implement channel-level APIs or generic thread listing unless the app has a concrete product need.
+
+
+
+### Chat UI surfaces
+
+Linq does not provide equivalents for Chat SDK modals, app home, slash commands, buttons, selects, or interactive cards.
+
+Do not implement modal/action/slash-command/app-home APIs for this adapter.
+
+
+
+### Ephemeral and scheduled messages
+
+Linq does not expose native ephemeral or scheduled message semantics that match Chat SDK expectations.
+
+Do not implement these unless Linq adds matching primitives.
