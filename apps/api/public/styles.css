@@ -110,6 +110,9 @@ h2 {
 
 .hero-actions {
   margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .ghost-link {
@@ -175,6 +178,10 @@ h2 {
 .field input:focus {
   outline: 2px solid rgba(15, 118, 110, 0.2);
   border-color: var(--accent);
+}
+
+.compact-field {
+  max-width: 520px;
 }
 
 .toggle {

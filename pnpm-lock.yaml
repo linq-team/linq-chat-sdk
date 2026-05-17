@@ -18,14 +18,14 @@ importers:
   apps/api:
     dependencies:
       '@chat-adapter/state-pg':
-        specifier: ^4.26.0
-        version: 4.26.0
+        specifier: ^4.28.1
+        version: 4.28.1
       '@chat-adapter/telegram':
-        specifier: ^4.26.0
-        version: 4.26.0
+        specifier: ^4.28.1
+        version: 4.28.1
       '@chat-adapter/whatsapp':
-        specifier: ^4.26.0
-        version: 4.26.0
+        specifier: ^4.28.1
+        version: 4.28.1
       '@linq-chat-sdk/adapter-linq':
         specifier: workspace:*
         version: link:../../packages/adapter-linq
@@ -36,8 +36,8 @@ importers:
         specifier: ^6.0.184
         version: 6.0.184(zod@4.4.3)
       chat:
-        specifier: ^4.26.0
-        version: 4.26.0
+        specifier: ^4.28.1
+        version: 4.28.1
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -68,8 +68,8 @@ importers:
         specifier: ^4.1.6
         version: 4.1.6(vitest@4.1.6)
       chat:
-        specifier: ^4.26.0
-        version: 4.26.0
+        specifier: ^4.28.1
+        version: 4.28.1
       oxfmt:
         specifier: ^0.50.0
         version: 0.50.0
@@ -119,17 +119,17 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@chat-adapter/shared@4.26.0':
-    resolution: {integrity: sha512-YD0MGktFXrArUqTBsyPfL5vkdD1WBS58PAWO0oVrMQAMmPxpAXfWGjBtZCkf3y8R8Svb0uVuVXiMZSForaEnMQ==}
+  '@chat-adapter/shared@4.28.1':
+    resolution: {integrity: sha512-v7AcZMrvS2gxFlRiUO1o9Nta2iipnnmV54Gie8e3nQTQvnghENfSf7j7nimA5DOUWCgj+e4DV7LE0x1pakNtkA==}
 
-  '@chat-adapter/state-pg@4.26.0':
-    resolution: {integrity: sha512-YnLDURfimQfZx7qeqoN2IdFpOH0xk4DUQcIDvNNnsgId6z40Lh4CyJqoZpiHE+y8EHAy3kJf43plWfxJVuB50A==}
+  '@chat-adapter/state-pg@4.28.1':
+    resolution: {integrity: sha512-/obIAWD161Q8oMwxGc1vABVhH+nAaSM6MLCaQ3EaoN0A1sHbY9W9aXQdB2F7+EhvhtWmNDsxBLZryNCL7jZgfA==}
 
-  '@chat-adapter/telegram@4.26.0':
-    resolution: {integrity: sha512-PE2HoCQ4648VNKZTuHFanQNoYzM/niNoSbDyYlPq6VOoB5qsoo1ctR8TERyl1EfPBNexWZpSWYrrnQPr15LUfA==}
+  '@chat-adapter/telegram@4.28.1':
+    resolution: {integrity: sha512-ZBw6zx36enxXGlbOoigzCsWH6slbTCOWyTGatCz7jq4DFTDpvjRgBBH760n9peFkZpXJWOAXZKJm/IW8saT5aw==}
 
-  '@chat-adapter/whatsapp@4.26.0':
-    resolution: {integrity: sha512-4wfWUjIMZRsbKLonQc+U2rIAaG5wDr8agpDmltaUVoHwwRUhnRuf2TX3PpfjJD8qLeHYdY9e7s9f+L4h5IRiuw==}
+  '@chat-adapter/whatsapp@4.28.1':
+    resolution: {integrity: sha512-NSU4Yda/uhbZXQNBnIgDHFWN+3ZBJ7L7mrFHUIctwZBX1XHlGkweWucfFbDynWgxb4IDm6NYZxA34+HVe8ugBA==}
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -881,8 +881,8 @@ packages:
   character-entities@2.0.2:
     resolution: {integrity: sha512-shx7oQ0Awen/BRIdkjkvz54PnEEI/EjwXDSIZp86/KKdbafHh1Df/RYGBhn4hbe2+uKC9FnT5UCEdyPz3ai9hQ==}
 
-  chat@4.26.0:
-    resolution: {integrity: sha512-QToDnIEGpyb8yQA6YLMHOSRK30YVk4RtsyFyuWFYyB2c4jQlyIrSWtwVK7qyvmvqzQp9uDwCdJRAhS8GtCHAGQ==}
+  chat@4.28.1:
+    resolution: {integrity: sha512-oKBeLQ746rSmHWGoXmPgDOqMVdIe9cWFQBQ1G2pw0l2vV4sAsZgfEJmc1UYqSJR4kYy4PxKgRFy31pe4RJ644Q==}
 
   consola@3.4.2:
     resolution: {integrity: sha512-5IKcdX0nnYavi6G7TtOhwkYzyjfJlatbjMjuLSfE2kYT5pMDOilZ4OvMhi637CcDICTmz3wARPoyhqyX1Y+XvA==}
@@ -1719,31 +1719,31 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@chat-adapter/shared@4.26.0':
+  '@chat-adapter/shared@4.28.1':
     dependencies:
-      chat: 4.26.0
+      chat: 4.28.1
     transitivePeerDependencies:
       - supports-color
 
-  '@chat-adapter/state-pg@4.26.0':
+  '@chat-adapter/state-pg@4.28.1':
     dependencies:
-      chat: 4.26.0
+      chat: 4.28.1
       pg: 8.20.0
     transitivePeerDependencies:
       - pg-native
       - supports-color
 
-  '@chat-adapter/telegram@4.26.0':
+  '@chat-adapter/telegram@4.28.1':
     dependencies:
-      '@chat-adapter/shared': 4.26.0
-      chat: 4.26.0
+      '@chat-adapter/shared': 4.28.1
+      chat: 4.28.1
     transitivePeerDependencies:
       - supports-color
 
-  '@chat-adapter/whatsapp@4.26.0':
+  '@chat-adapter/whatsapp@4.28.1':
     dependencies:
-      '@chat-adapter/shared': 4.26.0
-      chat: 4.26.0
+      '@chat-adapter/shared': 4.28.1
+      chat: 4.28.1
     transitivePeerDependencies:
       - supports-color
 
@@ -2217,7 +2217,7 @@ snapshots:
 
   character-entities@2.0.2: {}
 
-  chat@4.26.0:
+  chat@4.28.1:
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0

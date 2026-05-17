@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LINQ Chat SDK Thread Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero panel">
+      <p class="eyebrow">LINQ Chat SDK / Conversations</p>
+      <h1>Manage saved bot threads.</h1>
+      <p class="lede">
+        Pick a saved thread and the bot will load recent context, ask the agent for a short fun message,
+        and send it to that chat.
+      </p>
+      <div class="hero-actions">
+        <a class="ghost-link" href="/">Back to setup</a>
+        <a class="ghost-link" href="/api" target="_blank" rel="noopener noreferrer">Inspect API routes</a>
+      </div>
+    </section>
+
+    <section class="panel stack">
+      <div class="section-heading split-heading">
+        <div>
+          <p class="eyebrow">Conversations</p>
+          <h2>Threads</h2>
+        </div>
+        <button id="refresh-threads" class="secondary" type="button">Refresh threads</button>
+      </div>
+
+      <label class="field compact-field">
+        <span>Setup access token</span>
+        <input id="setup-token" type="password" placeholder="Only needed if BOT_SETUP_ACCESS_TOKEN is set" autocomplete="off">
+        <small>Used for the protected thread admin endpoints. The app never writes this token anywhere.</small>
+      </label>
+
+      <div id="flash" class="flash hidden" role="status" aria-live="polite"></div>
+
+      <div id="thread-list" class="thread-list"></div>
+      <p id="thread-empty" class="note hidden">No persisted chat threads yet. Message the bot once, then refresh.</p>
+    </section>
+  </main>
+
+  <script>
+    const setupTokenInput = document.getElementById("setup-token");
+    const refreshThreadsButton = document.getElementById("refresh-threads");
+    const flash = document.getElementById("flash");
+    const threadList = document.getElementById("thread-list");
+    const threadEmpty = document.getElementById("thread-empty");
+
+    function authHeaders() {
+      const token = setupTokenInput.value.trim();
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
+    function setFlash(message, tone) {
+      flash.textContent = message;
+      flash.className = `flash ${tone}`;
+    }
+
+    function formatDate(value) {
+      if (!value) {
+        return "Unknown time";
+      }
+
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function renderThreads(threads) {
+      threadList.innerHTML = "";
+      threadEmpty.classList.toggle("hidden", threads.length > 0);
+
+      for (const thread of threads) {
+        const card = document.createElement("article");
+        card.className = "thread-card";
+
+        const details = document.createElement("div");
+        details.className = "thread-details";
+
+        const title = document.createElement("strong");
+        title.textContent = thread.id;
+
+        const meta = document.createElement("p");
+        meta.className = "status-label";
+        meta.textContent = `${thread.messageCount} messages · ${formatDate(thread.latestMessage?.dateSent)}`;
+
+        const preview = document.createElement("p");
+        preview.className = "thread-preview";
+        const author = thread.latestMessage?.authorName ? `${thread.latestMessage.authorName}: ` : "";
+        preview.textContent = `${author}${thread.latestMessage?.text || "No text preview"}`;
+
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.type = "button";
+        button.textContent = "Send fun message";
+        button.addEventListener("click", () => sendFunMessage(thread.id, button));
+
+        details.append(title, meta, preview);
+        card.append(details, button);
+        threadList.append(card);
+      }
+    }
+
+    async function loadThreads() {
+      refreshThreadsButton.disabled = true;
+      setFlash("Loading threads…", "info");
+
+      try {
+        const response = await fetch("/api/threads", {
+          headers: authHeaders(),
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body.message || "Unable to load threads.");
+        }
+
+        renderThreads(body.threads || []);
+        setFlash("Threads refreshed.", "good");
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : "Unable to load threads.", "bad");
+      } finally {
+        refreshThreadsButton.disabled = false;
+      }
+    }
+
+    async function sendFunMessage(threadId, button) {
+      button.disabled = true;
+      setFlash("Asking the agent for something fun…", "info");
+
+      try {
+        const response = await fetch("/api/threads/send-fun", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders(),
+          },
+          body: JSON.stringify({ threadId }),
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body.message || "Unable to send fun message.");
+        }
+
+        setFlash(`Sent: ${body.message}`, "good");
+        await loadThreads();
+      } catch (error) {
+        setFlash(error instanceof Error ? error.message : "Unable to send fun message.", "bad");
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    refreshThreadsButton.addEventListener("click", loadThreads);
+    loadThreads().catch((error) => {
+      setFlash(error instanceof Error ? error.message : "Unable to load threads.", "bad");
+    });
+  </script>
+</body>
+</html>

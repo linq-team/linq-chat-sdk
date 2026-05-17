@@ -19,8 +19,10 @@ The adapter can already handle the core receive/reply path:
 - Add and remove reactions with `messages.addReaction()`.
 - Cache direct-message vs group-chat metadata in new thread IDs.
 - Detect direct-message vs group-chat threads from encoded metadata.
+- Encode Linq thread IDs with Chat SDK-compatible colon prefixes (`linq:<chatId>:dm/group`).
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
+- Automatically subscribe and respond to inbound Linq group chats received through webhooks.
 
 ## Work still left
 
@@ -88,21 +90,29 @@ Future support should subscribe to:
 
 Then map those webhooks into `chat.processReaction()`.
 
-### 4. Opening new direct messages / creating chats
-
-Status: **not implemented**
-
-Linq creates chats with an initial message.
-
-Chat SDK `openDM()` expects to return a thread before posting.
-
-Those semantics do not line up cleanly.
-
-This needs a deliberate product/API decision before implementation.
-
 ## Will not implement
 
 These are intentional adapter boundaries, not backlog items.
+
+
+
+### Opening new direct messages / creating chats
+
+Linq creates chats with an initial message.
+
+Chat SDK `openDM()` expects to return a thread before posting, so the semantics do not line up cleanly.
+
+This reference adapter will not implement `openDM()` or generic chat creation APIs. It only sends replies to existing Linq chats received through webhooks.
+
+
+
+### Starting new group chats / outbound group messages
+
+Linq group chats also require chat creation semantics and an initial message.
+
+This reference adapter will not implement APIs for creating group chats or starting outbound group-message conversations.
+
+Existing group chats received through webhooks are still parsed, automatically subscribed, replied to with `postMessage()`, and detected as non-DM threads.
 
 
 

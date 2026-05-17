@@ -220,9 +220,9 @@ describe("LinqAdapter.postMessage", () => {
     vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
       chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
     });
-    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq-chat-123");
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
 
-    const result = await adapter.postMessage("linq-chat-123", " hello ");
+    const result = await adapter.postMessage("linq:chat-123", " hello ");
 
     expect(send).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc", {
       message: {
@@ -231,7 +231,7 @@ describe("LinqAdapter.postMessage", () => {
     });
     expect(result).toEqual({
       id: "outbound-message-id",
-      threadId: "linq-chat-123",
+      threadId: "linq:chat-123",
       raw: {
         chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
         message: {
@@ -250,7 +250,7 @@ describe("LinqAdapter.postMessage", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-id" });
 
-    await expect(adapter.postMessage("linq-chat-id", "   ")).rejects.toThrow(
+    await expect(adapter.postMessage("linq:chat-id", "   ")).rejects.toThrow(
       "Linq message text cannot be empty.",
     );
   });
@@ -269,7 +269,7 @@ describe("LinqAdapter.startTyping", () => {
       chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
     });
 
-    await adapter.startTyping("linq-chat-123");
+    await adapter.startTyping("linq:chat-123");
 
     expect(start).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
   });
@@ -283,7 +283,7 @@ describe("LinqAdapter.startTyping", () => {
       chats: { typing: { start } },
     };
 
-    await adapter.startTyping("linq-3caaf1a0-ef9f-46e0-8c22-31e82c8514dc-group");
+    await adapter.startTyping("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc:group");
 
     expect(start).not.toHaveBeenCalled();
   });
@@ -298,7 +298,7 @@ describe("LinqAdapter.startTyping", () => {
     };
 
     await expect(
-      adapter.startTyping("linq-3caaf1a0-ef9f-46e0-8c22-31e82c8514dc"),
+      adapter.startTyping("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc"),
     ).resolves.toBeUndefined();
   });
 });
@@ -308,7 +308,7 @@ describe("LinqAdapter.stream", () => {
     const adapter = createTestAdapter();
     const postMessage = vi.spyOn(adapter, "postMessage").mockResolvedValue({
       id: "stream-message-id",
-      threadId: "linq-chat-123",
+      threadId: "linq:chat-123",
       raw: {
         chat_id: "chat-123",
         message: {
@@ -322,9 +322,9 @@ describe("LinqAdapter.stream", () => {
       },
     });
 
-    const result = await adapter.stream("linq-chat-123", createTestStream());
+    const result = await adapter.stream("linq:chat-123", createTestStream());
 
-    expect(postMessage).toHaveBeenCalledWith("linq-chat-123", {
+    expect(postMessage).toHaveBeenCalledWith("linq:chat-123", {
       markdown: "Hello world",
     });
     expect(result.id).toBe("stream-message-id");
@@ -335,7 +335,7 @@ describe("LinqAdapter.channelIdFromThreadId", () => {
   it("uses the Linq thread ID as the channel ID", () => {
     const adapter = createTestAdapter();
 
-    expect(adapter.channelIdFromThreadId("linq-chat-123")).toBe("linq-chat-123");
+    expect(adapter.channelIdFromThreadId("linq:chat-123")).toBe("linq:chat-123");
   });
 });
 
@@ -343,14 +343,14 @@ describe("LinqAdapter.isDM", () => {
   it("treats Linq chat threads as DMs", () => {
     const adapter = createTestAdapter();
 
-    expect(adapter.isDM("linq-chat-123")).toBe(true);
+    expect(adapter.isDM("linq:chat-123")).toBe(true);
   });
 
   it("detects group chats from encoded thread IDs", () => {
     const adapter = createTestAdapter();
 
-    expect(adapter.isDM("linq-chat-123-group")).toBe(false);
-    expect(adapter.isDM("linq-chat-123-dm")).toBe(true);
+    expect(adapter.isDM("linq:chat-123:group")).toBe(false);
+    expect(adapter.isDM("linq:chat-123:dm")).toBe(true);
   });
 });
 

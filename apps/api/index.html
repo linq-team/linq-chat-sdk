@@ -20,6 +20,7 @@
       </p>
       <div class="hero-actions">
         <a class="ghost-link" href="/api" target="_blank" rel="noopener noreferrer">Inspect API routes</a>
+        <a class="ghost-link" href="/threads">Manage threads</a>
       </div>
     </section>
 
@@ -127,23 +128,6 @@
       </section>
     </section>
 
-    <section class="panel stack">
-      <div class="section-heading split-heading">
-        <div>
-          <p class="eyebrow">Conversations</p>
-          <h2>Threads</h2>
-        </div>
-        <button id="refresh-threads" class="secondary" type="button">Refresh threads</button>
-      </div>
-
-      <p class="note">
-        Pick a saved thread and the bot will load recent context, ask the agent for a short fun message, and send it to that chat.
-      </p>
-
-      <div id="thread-list" class="thread-list"></div>
-      <p id="thread-empty" class="note hidden">No persisted chat threads yet. Message the bot once, then refresh.</p>
-    </section>
-
     <section class="grid lower-grid">
       <section class="panel stack">
         <div class="section-heading">
@@ -187,7 +171,6 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
     const registerWebhookButton = document.getElementById("register-webhook");
     const registerLinqWebhookButton = document.getElementById("register-linq-webhook");
     const refreshStatusButton = document.getElementById("refresh-status");
-    const refreshThreadsButton = document.getElementById("refresh-threads");
     const flash = document.getElementById("flash");
 
     const databaseState = document.getElementById("database-state");
@@ -205,8 +188,6 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
     const configuredUsername = document.getElementById("configured-username");
     const accessRequirement = document.getElementById("access-requirement");
     const statusJson = document.getElementById("status-json");
-    const threadList = document.getElementById("thread-list");
-    const threadEmpty = document.getElementById("thread-empty");
 
     publicBaseUrlInput.value = window.location.origin;
 
@@ -228,50 +209,6 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
     function updateStatusCard(labelElement, badgeElement, label, detail, tone) {
       labelElement.textContent = detail;
       setBadge(badgeElement, label, tone);
-    }
-
-    function formatDate(value) {
-      if (!value) {
-        return "Unknown time";
-      }
-
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-    }
-
-    function renderThreads(threads) {
-      threadList.innerHTML = "";
-      threadEmpty.classList.toggle("hidden", threads.length > 0);
-
-      for (const thread of threads) {
-        const card = document.createElement("article");
-        card.className = "thread-card";
-
-        const details = document.createElement("div");
-        details.className = "thread-details";
-
-        const title = document.createElement("strong");
-        title.textContent = thread.id;
-
-        const meta = document.createElement("p");
-        meta.className = "status-label";
-        meta.textContent = `${thread.messageCount} messages · ${formatDate(thread.latestMessage?.dateSent)}`;
-
-        const preview = document.createElement("p");
-        preview.className = "thread-preview";
-        const author = thread.latestMessage?.authorName ? `${thread.latestMessage.authorName}: ` : "";
-        preview.textContent = `${author}${thread.latestMessage?.text || "No text preview"}`;
-
-        const button = document.createElement("button");
-        button.className = "secondary";
-        button.type = "button";
-        button.textContent = "Send fun message";
-        button.addEventListener("click", () => sendFunMessage(thread.id, button));
-
-        details.append(title, meta, preview);
-        card.append(details, button);
-        threadList.append(card);
-      }
     }
 
     function renderStatus(payload) {
@@ -349,57 +286,6 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
       setFlash("Status refreshed.", "good");
     }
 
-    async function loadThreads() {
-      refreshThreadsButton.disabled = true;
-      setFlash("Loading threads…", "info");
-
-      try {
-        const response = await fetch("/api/threads", {
-          headers: authHeaders(),
-        });
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(body.message || "Unable to load threads.");
-        }
-
-        renderThreads(body.threads || []);
-        setFlash("Threads refreshed.", "good");
-      } catch (error) {
-        setFlash(error instanceof Error ? error.message : "Unable to load threads.", "bad");
-      } finally {
-        refreshThreadsButton.disabled = false;
-      }
-    }
-
-    async function sendFunMessage(threadId, button) {
-      button.disabled = true;
-      setFlash("Asking the agent for something fun…", "info");
-
-      try {
-        const response = await fetch("/api/threads/send-fun", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...authHeaders(),
-          },
-          body: JSON.stringify({ threadId }),
-        });
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(body.message || "Unable to send fun message.");
-        }
-
-        setFlash(`Sent: ${body.message}`, "good");
-        await loadThreads();
-      } catch (error) {
-        setFlash(error instanceof Error ? error.message : "Unable to send fun message.", "bad");
-      } finally {
-        button.disabled = false;
-      }
-    }
-
     async function registerWebhook() {
       registerWebhookButton.disabled = true;
       setFlash("Registering Telegram webhook…", "info");
@@ -467,12 +353,10 @@ BOT_SETUP_ACCESS_TOKEN=optional-setup-password</code></pre>
     registerWebhookButton.addEventListener("click", registerWebhook);
     registerLinqWebhookButton.addEventListener("click", registerLinqWebhook);
     refreshStatusButton.addEventListener("click", loadStatus);
-    refreshThreadsButton.addEventListener("click", loadThreads);
 
     loadStatus().catch((error) => {
       setFlash(error instanceof Error ? error.message : "Unable to load setup status.", "bad");
     });
-    loadThreads().catch(() => {});
   </script>
 </body>
 </html>

@@ -26,6 +26,7 @@ let bot:
 const AI_MODEL = "anthropic/claude-haiku-4.5";
 const INITIAL_TYPING_PAUSE_MS = 1_500;
 const TYPING_REFRESH_MS = 4_000;
+const ANY_MESSAGE_PATTERN = /^[\s\S]*$/;
 
 const reactionToolInputSchema = z
   .object({
@@ -308,6 +309,15 @@ async function createBot() {
     await postAiReply(thread, message);
   });
 
+  chat.onNewMessage(ANY_MESSAGE_PATTERN, async (thread, message) => {
+    if (thread.adapter.name !== "linq" || thread.isDM) {
+      return;
+    }
+
+    await thread.subscribe();
+    await postAiReply(thread, message);
+  });
+
   chat.onSubscribedMessage(async (thread, message) => {
     await postAiReply(thread, message);
   });
@@ -328,7 +338,7 @@ export async function sendFunMessageToThread(threadId: string) {
   await chat.initialize();
 
   const message = await generateFunOutboundMessage(threadId);
-  const sent = await chat.channel(threadId).post({ markdown: message });
+  const sent = await chat.thread(threadId).post({ markdown: message });
 
   return {
     message,

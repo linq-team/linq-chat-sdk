@@ -88,24 +88,28 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   // Thread ID
   encodeThreadId(platformData: LinqThreadId): string {
     if (platformData.isGroup === undefined) {
-      return `linq-${platformData.chatId}`;
+      return `linq:${platformData.chatId}`;
     }
 
-    return `linq-${platformData.chatId}-${platformData.isGroup ? "group" : "dm"}`;
+    return `linq:${platformData.chatId}:${platformData.isGroup ? "group" : "dm"}`;
   }
 
   decodeThreadId(threadId: string): LinqThreadId {
-    const value = threadId.replace("linq-", "");
+    const [adapterName, chatId, kind] = threadId.split(":");
 
-    if (value.endsWith("-group")) {
-      return { chatId: value.slice(0, -"-group".length), isGroup: true };
+    if (adapterName !== "linq" || !chatId) {
+      throw new Error(`Invalid Linq thread ID: ${threadId}`);
     }
 
-    if (value.endsWith("-dm")) {
-      return { chatId: value.slice(0, -"-dm".length), isGroup: false };
+    if (kind === "group") {
+      return { chatId, isGroup: true };
     }
 
-    return { chatId: value };
+    if (kind === "dm") {
+      return { chatId, isGroup: false };
+    }
+
+    return { chatId };
   }
 
   // Messages
