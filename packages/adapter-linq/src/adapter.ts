@@ -1,5 +1,5 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
-import { Message, NotImplementedError } from "chat";
+import { ConsoleLogger, Message, NotImplementedError } from "chat";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -8,107 +8,156 @@ import type {
   FetchOptions,
   FetchResult,
   FormattedContent,
+  Logger,
   RawMessage,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
 
-import { LinqFormatConverter } from "./format-converter.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
 
-type LinqMessageReceivedWebhook = LinqAPIV3.MessageReceivedWebhookEvent;
-type LinqMessageSendResponse = Awaited<ReturnType<LinqAPIV3["chats"]["messages"]["send"]>>;
-type LinqMessagePart = { type?: string; value?: string };
-
-type LinqRawMessage = LinqMessageReceivedWebhook;
+type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"];
 
 type LinqThreadId = {
   chatId: string;
-  isGroup: boolean;
 };
+
+export interface LinqAdapterConfig {
+  signingSecret: string;
+}
 
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
+  private readonly signingSecret: string;
 
-  initialize(chat: ChatInstance): Promise<void> {
-    throw new NotImplementedError("initialize is not implemented");
+  private chat: ChatInstance | null = null;
+  private logger: Logger;
+
+  constructor(config: LinqAdapterConfig) {
+    this.signingSecret = config.signingSecret;
+    this.logger = new ConsoleLogger();
+  }
+
+  async initialize(chat: ChatInstance): Promise<void> {
+    this.chat = chat;
+    this.logger = chat.getLogger("linq");
   }
 
   // Thread ID
-  encodeThreadId(platformData: LinqThreadId): string {
+  encodeThreadId(_platformData: LinqThreadId): string {
     throw new NotImplementedError("encodeThreadId is not implemented");
   }
 
-  decodeThreadId(threadId: string): LinqThreadId {
+  decodeThreadId(_threadId: string): LinqThreadId {
     throw new NotImplementedError("decodeThreadId is not implemented");
   }
 
   // Messages
-  fetchMessages(threadId: string, options?: FetchOptions): Promise<FetchResult<LinqRawMessage>> {
+  fetchMessages(_threadId: string, _options?: FetchOptions): Promise<FetchResult<LinqRawMessage>> {
     throw new NotImplementedError("fetchMessages is not implemented");
   }
 
-  fetchMessage(threadId: string, messageId: string): Promise<Message<LinqRawMessage> | null> {
+  fetchMessage(_threadId: string, _messageId: string): Promise<Message<LinqRawMessage> | null> {
     throw new NotImplementedError("fetchMessage is not implemented");
   }
 
   postMessage(
-    threadId: string,
-    message: AdapterPostableMessage,
+    _threadId: string,
+    _message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
     throw new NotImplementedError("postMessage is not implemented");
   }
 
   editMessage(
-    threadId: string,
-    messageId: string,
-    message: AdapterPostableMessage,
+    _threadId: string,
+    _messageId: string,
+    _message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
     throw new NotImplementedError("editMessage is not implemented");
   }
 
-  deleteMessage(threadId: string, messageId: string): Promise<void> {
+  deleteMessage(_threadId: string, _messageId: string): Promise<void> {
     throw new NotImplementedError("deleteMessage is not implemented");
   }
 
   // Reactions
-  addReaction(threadId: string, messageId: string, emoji: EmojiValue | string): Promise<void> {
+  addReaction(_threadId: string, _messageId: string, _emoji: EmojiValue | string): Promise<void> {
     throw new NotImplementedError("addReaction is not implemented");
   }
 
-  removeReaction(threadId: string, messageId: string, emoji: EmojiValue | string): Promise<void> {
+  removeReaction(
+    _threadId: string,
+    _messageId: string,
+    _emoji: EmojiValue | string,
+  ): Promise<void> {
     throw new NotImplementedError("removeReaction is not implemented");
   }
 
   // Threads
-  fetchThread(threadId: string): Promise<ThreadInfo> {
+  fetchThread(_threadId: string): Promise<ThreadInfo> {
     throw new NotImplementedError("fetchThread is not implemented");
   }
 
-  startTyping(threadId: string, status?: string): Promise<void> {
+  startTyping(_threadId: string, _status?: string): Promise<void> {
     throw new NotImplementedError("startTyping is not implemented");
   }
 
   // handle webhook
-  handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    throw new NotImplementedError("handleWebhook is not implemented");
+  async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
+    type LinqWebhookEvent = LinqAPIV3.EventsWebhookEvent;
+
+    const verification = await verifyLinqWebhookRequest(request, this.signingSecret);
+
+    if (!verification.ok) {
+      return verification.response;
+    }
+
+    let event: LinqWebhookEvent;
+
+    try {
+      event = JSON.parse(new TextDecoder().decode(verification.rawBody)) as LinqWebhookEvent;
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
+      const threadId = this.encodeThreadId({
+        chatId: event.data.chat.id,
+      });
+
+      const factory = async (): Promise<Message<unknown>> => {
+        const msg = this.parseMessage(event.data);
+
+        return msg;
+      };
+
+      this.chat.processMessage(this, threadId, factory, options);
+    }
+
+    return new Response("OK", { status: 200 });
+
+    function isMessageReceivedWebhookEvent(
+      event: LinqWebhookEvent,
+    ): event is LinqAPIV3.Webhooks.MessageReceivedWebhookEvent {
+      return event.event_type === "message.received";
+    }
   }
 
-  parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
+  parseMessage(_raw: LinqRawMessage): Message<LinqRawMessage> {
     throw new NotImplementedError("parseMessage is not implemented");
   }
 
   // Random
-  renderFormatted(content: FormattedContent): string {
+  renderFormatted(_content: FormattedContent): string {
     throw new NotImplementedError("renderFormatted is not implemented");
   }
 
-  channelIdFromThreadId(threadId: string): string {
+  channelIdFromThreadId(_threadId: string): string {
     throw new NotImplementedError("channelIdFromThreadId is not implemented");
   }
 }
 
-export function createLinqAdapter() {
-  return new LinqAdapter();
+export function createLinqAdapter(config: LinqAdapterConfig) {
+  return new LinqAdapter(config);
 }

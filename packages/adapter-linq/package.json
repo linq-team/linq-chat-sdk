@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "tsc --project tsconfig.json --watch",
     "build": "tsc --project tsconfig.json",
+    "test": "vitest run",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
@@ -27,9 +28,11 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^4.1.6",
     "chat": "^4.26.0",
     "oxfmt": "^0.50.0",
-    "oxlint": "^1.65.0"
+    "oxlint": "^1.65.0",
+    "vitest": "^4.1.6"
   },
   "peerDependencies": {
     "chat": "^4.26.0"

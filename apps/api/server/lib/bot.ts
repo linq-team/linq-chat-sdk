@@ -4,6 +4,7 @@ import { createTelegramAdapter } from "@chat-adapter/telegram"
 import { Chat } from "chat"
 
 import {
+  getLinqWebhookSecret,
   getPostgresPool,
   getTelegramWebhookSecret,
 } from "./database"
@@ -30,7 +31,8 @@ function buildReply(text: string): string {
 async function createBot() {
   const telegramSecret = await getTelegramWebhookSecret()
   const telegram = createTelegramAdapter({ mode: "webhook", secretToken: telegramSecret ?? undefined })
-  const linq = createLinqAdapter()
+  const linqSigningSecret = await getLinqWebhookSecret()
+  const linq = createLinqAdapter({ signingSecret: linqSigningSecret ?? "" })
 
   const chat = new Chat({
     userName: process.env.TELEGRAM_BOT_USERNAME?.trim() || "linqbot",
