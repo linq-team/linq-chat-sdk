@@ -168,13 +168,15 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     });
   }
 
-  removeReaction(_threadId: string, messageId: string, emoji: EmojiValue | string): Promise<void> {
-    return this.apiClient.messages
-      .addReaction(messageId, {
-        operation: "remove",
-        ...toLinqReaction(emoji),
-      })
-      .then(() => undefined);
+  async removeReaction(
+    _threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string,
+  ): Promise<void> {
+    await this.apiClient.messages.addReaction(messageId, {
+      operation: "remove",
+      ...toLinqReaction(emoji),
+    });
   }
 
   // Threads
