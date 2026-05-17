@@ -18,6 +18,7 @@ let bot: Chat<{
 }> | undefined
 
 const AI_MODEL = "anthropic/claude-haiku-4.5"
+const INITIAL_TYPING_PAUSE_MS = 1_500
 const TYPING_REFRESH_MS = 4_000
 
 function createAgent() {
@@ -46,11 +47,16 @@ async function postAiReply(thread: Thread, message: Message) {
   const typingInterval = setInterval(refreshTyping, TYPING_REFRESH_MS)
 
   try {
+    await sleep(INITIAL_TYPING_PAUSE_MS)
     const result = await createAgent().stream({ prompt })
     await thread.post(result.fullStream)
   } finally {
     clearInterval(typingInterval)
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function createBot() {

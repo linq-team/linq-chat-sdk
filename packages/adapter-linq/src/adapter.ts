@@ -130,6 +130,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   async startTyping(threadId: string, _status?: string): Promise<void> {
     const { chatId } = this.decodeThreadId(threadId);
 
+    // todo: disable in group chat
     await this.apiClient.chats.typing.start(chatId);
   }
 
