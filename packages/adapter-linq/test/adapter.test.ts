@@ -170,6 +170,53 @@ describe("LinqAdapter.postMessage", () => {
   });
 });
 
+describe("LinqAdapter.startTyping", () => {
+  it("starts a Linq typing indicator for the thread chat", async () => {
+    const adapter = createTestAdapter();
+    const start = vi.fn().mockResolvedValue(undefined);
+    (
+      adapter as unknown as { apiClient: { chats: { typing: { start: typeof start } } } }
+    ).apiClient = {
+      chats: { typing: { start } },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
+      chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+    });
+
+    await adapter.startTyping("linq-chat-123");
+
+    expect(start).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
+  });
+});
+
+describe("LinqAdapter.stream", () => {
+  it("buffers stream chunks and sends one final message", async () => {
+    const adapter = createTestAdapter();
+    const postMessage = vi.spyOn(adapter, "postMessage").mockResolvedValue({
+      id: "stream-message-id",
+      threadId: "linq-chat-123",
+      raw: {
+        chat_id: "chat-123",
+        message: {
+          id: "stream-message-id",
+          created_at: "2026-05-08T16:22:00.000Z",
+          delivery_status: "queued",
+          is_read: false,
+          parts: [{ type: "text", value: "Hello world" }],
+          sent_at: null,
+        },
+      },
+    });
+
+    const result = await adapter.stream("linq-chat-123", createTestStream());
+
+    expect(postMessage).toHaveBeenCalledWith("linq-chat-123", {
+      markdown: "Hello world",
+    });
+    expect(result.id).toBe("stream-message-id");
+  });
+});
+
 describe("LinqAdapter.channelIdFromThreadId", () => {
   it("uses the Linq thread ID as the channel ID", () => {
     const adapter = createTestAdapter();
@@ -188,6 +235,12 @@ describe("LinqAdapter.isDM", () => {
 
 function createTestAdapter() {
   return createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
+}
+
+async function* createTestStream() {
+  yield "Hello";
+  yield { type: "markdown_text", text: " world" } as const;
+  yield { type: "task_update", id: "ignored", status: "complete", title: "Ignored" } as const;
 }
 
 function createSignedRequest(

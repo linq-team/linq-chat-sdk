@@ -1,7 +1,9 @@
 import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq"
 import { createPostgresState } from "@chat-adapter/state-pg"
 import { createTelegramAdapter } from "@chat-adapter/telegram"
+import { ToolLoopAgent } from "ai"
 import { Chat } from "chat"
+import type { Message, Thread } from "chat"
 
 import {
   getLinqWebhookSecret,
@@ -15,18 +17,40 @@ let bot: Chat<{
   telegram: ReturnType<typeof createTelegramAdapter>
 }> | undefined
 
-function buildReply(text: string): string {
-  if (!text.trim()) {
-    return "Chat SDK is connected to this API. Replace this starter reply with your real bot workflow."
+const AI_MODEL = "anthropic/claude-haiku-4.5"
+const TYPING_REFRESH_MS = 4_000
+
+function createAgent() {
+  return new ToolLoopAgent({
+    model: AI_MODEL,
+    instructions: [
+      "You are a friendly AI assistant replying in a chat conversation.",
+      "Reply like a warm, goofy, fun chat companion: playful, uplifting, and a little cheeky, but never disrespectful.",
+      "Keep replies concise, useful, and easy to read in a text message.",
+    ].join("\n"),
+  })
+}
+
+async function postAiReply(thread: Thread, message: Message) {
+  const prompt = message.text.trim()
+
+  if (!prompt) {
+    await thread.post("I can reply to text messages. Send me a message and I'll help.")
+    return
   }
 
-  return [
-    "Chat SDK is connected to this API.",
-    "",
-    "Replace this starter reply with your real bot workflow.",
-    "",
-    `Latest message: ${text}`,
-  ].join("\n")
+  const refreshTyping = () => {
+    void thread.startTyping().catch(() => {})
+  }
+  refreshTyping()
+  const typingInterval = setInterval(refreshTyping, TYPING_REFRESH_MS)
+
+  try {
+    const result = await createAgent().stream({ prompt })
+    await thread.post(result.fullStream)
+  } finally {
+    clearInterval(typingInterval)
+  }
 }
 
 async function createBot() {
@@ -58,17 +82,16 @@ async function createBot() {
 
   chat.onDirectMessage(async (thread, message) => {
     await thread.subscribe()
-    await thread.post(buildReply(message.text))
-    // message.
+    await postAiReply(thread, message)
   })
 
   chat.onNewMention(async (thread, message) => {
     await thread.subscribe()
-    await thread.post(buildReply(message.text))
+    await postAiReply(thread, message)
   })
 
   chat.onSubscribedMessage(async (thread, message) => {
-    await thread.post(buildReply(message.text))
+    await postAiReply(thread, message)
   })
 
   return chat

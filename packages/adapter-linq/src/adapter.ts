@@ -11,6 +11,7 @@ import type {
   FormattedContent,
   Logger,
   RawMessage,
+  StreamChunk,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
@@ -126,8 +127,30 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     throw new NotImplementedError("fetchThread is not implemented");
   }
 
-  startTyping(_threadId: string, _status?: string): Promise<void> {
-    throw new NotImplementedError("startTyping is not implemented");
+  async startTyping(threadId: string, _status?: string): Promise<void> {
+    const { chatId } = this.decodeThreadId(threadId);
+
+    await this.apiClient.chats.typing.start(chatId);
+  }
+
+  async stream(
+    threadId: string,
+    textStream: AsyncIterable<string | StreamChunk>,
+  ): Promise<RawMessage<LinqRawMessage>> {
+    let text = "";
+
+    for await (const chunk of textStream) {
+      if (typeof chunk === "string") {
+        text += chunk;
+        continue;
+      }
+
+      if (chunk.type === "markdown_text") {
+        text += chunk.text;
+      }
+    }
+
+    return this.postMessage(threadId, text.trim() ? { markdown: text } : " ");
   }
 
   // handle webhook
