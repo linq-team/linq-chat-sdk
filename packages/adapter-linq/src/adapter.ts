@@ -1,8 +1,9 @@
 import { LinqAPIV3 } from "@linqapp/sdk";
-import { ConsoleLogger, Message, NotImplementedError } from "chat";
+import { ConsoleLogger, Message, NotImplementedError, parseMarkdown } from "chat";
 import type {
   Adapter,
   AdapterPostableMessage,
+  Attachment,
   ChatInstance,
   EmojiValue,
   FetchOptions,
@@ -17,6 +18,7 @@ import type {
 import { verifyLinqWebhookRequest } from "./verification.js";
 
 type LinqRawMessage = LinqAPIV3.EventsWebhookEvent["data"];
+type LinqMessageEvent = LinqAPIV3.MessageEventV2;
 
 type LinqThreadId = {
   chatId: string;
@@ -144,8 +146,99 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
   }
 
-  parseMessage(_raw: LinqRawMessage): Message<LinqRawMessage> {
-    throw new NotImplementedError("parseMessage is not implemented");
+  parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
+    if (!isMessageEvent(raw)) {
+      throw new NotImplementedError("parseMessage only supports Linq message events");
+    }
+
+    const text = raw.parts
+      .flatMap((part) => {
+        if ((part.type === "text" || part.type === "link") && typeof part.value === "string") {
+          return [part.value];
+        }
+
+        return [];
+      })
+      .join("\n")
+      .trim();
+
+    const isMe = raw.direction === "outbound" || raw.sender_handle.is_me === true;
+    const senderId = raw.sender_handle.id || raw.sender_handle.handle || "unknown";
+    const senderName = raw.sender_handle.handle || raw.sender_handle.id || "unknown";
+
+    return new Message({
+      id: raw.id,
+      threadId: this.encodeThreadId({ chatId: raw.chat.id }),
+      text,
+      formatted: parseMarkdown(text),
+      raw,
+      author: {
+        userId: senderId,
+        userName: senderName,
+        fullName: senderName,
+        isBot: isMe,
+        isMe,
+      },
+      metadata: {
+        dateSent: dateFrom(raw.sent_at),
+        edited: false,
+      },
+      attachments: raw.parts.flatMap((part): Attachment[] => {
+        if (part.type !== "media") {
+          return [];
+        }
+
+        return [
+          {
+            type: attachmentType(part.mime_type),
+            url: part.url,
+            name: part.filename,
+            mimeType: part.mime_type,
+            size: part.size_bytes,
+          },
+        ];
+      }),
+    });
+
+    function isMessageEvent(value: LinqRawMessage): value is LinqMessageEvent {
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        "id" in value &&
+        "chat" in value &&
+        "direction" in value &&
+        "parts" in value &&
+        "sender_handle" in value
+      );
+    }
+
+    function dateFrom(value: string | null | undefined): Date {
+      if (value) {
+        const date = new Date(value);
+
+        if (!Number.isNaN(date.getTime())) {
+          return date;
+        }
+      }
+
+      return new Date();
+    }
+
+    function attachmentType(mimeType: string): Attachment["type"] {
+      if (mimeType.startsWith("image/")) {
+        return "image";
+      }
+
+      if (mimeType.startsWith("video/")) {
+        return "video";
+      }
+
+      if (mimeType.startsWith("audio/")) {
+        return "audio";
+      }
+
+      return "file";
+    }
   }
 
   // Random

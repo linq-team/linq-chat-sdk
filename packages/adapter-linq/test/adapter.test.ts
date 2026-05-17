@@ -59,6 +59,58 @@ describe("LinqAdapter.handleWebhook", () => {
   });
 });
 
+describe("LinqAdapter.parseMessage", () => {
+  it("normalizes text message.received data", () => {
+    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+
+    const message = adapter.parseMessage(createMessageReceivedPayload().data);
+
+    expect(message.id).toBe("e230c922-3e96-4376-9332-67b644d11237");
+    expect(message.threadId).toBe("linq:chat-123");
+    expect(message.text).toBe("hi");
+    expect(message.author).toMatchObject({
+      userId: "1fcfb06a-99d6-4df5-9e26-d8a5b1be24ed",
+      userName: "+15550002000",
+      fullName: "+15550002000",
+      isBot: false,
+      isMe: false,
+    });
+    expect(message.metadata.dateSent.toISOString()).toBe("2026-05-08T16:21:12.499Z");
+    expect(message.metadata.edited).toBe(false);
+    expect(message.attachments).toEqual([]);
+  });
+
+  it("normalizes media parts as attachments", () => {
+    const adapter = createLinqAdapter({ signingSecret: SIGNING_SECRET });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const payload = createMessageReceivedPayload();
+    payload.data.parts = [
+      {
+        id: "006a4826-7700-45e3-8796-39a7e26137e6",
+        url: "https://cdn.linqapp.com/attachments/test/IMG_3389.png",
+        type: "media",
+        filename: "IMG_3389.png",
+        mime_type: "image/png",
+        size_bytes: 58500,
+      },
+    ];
+
+    const message = adapter.parseMessage(payload.data);
+
+    expect(message.text).toBe("");
+    expect(message.attachments).toEqual([
+      {
+        type: "image",
+        url: "https://cdn.linqapp.com/attachments/test/IMG_3389.png",
+        name: "IMG_3389.png",
+        mimeType: "image/png",
+        size: 58500,
+      },
+    ]);
+  });
+});
+
 function createSignedRequest(
   payload: unknown,
   overrides: { signature?: string; timestamp?: string } = {},
