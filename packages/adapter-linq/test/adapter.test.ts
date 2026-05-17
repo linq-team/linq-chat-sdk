@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import type { LinqAPIV3 } from "@linqapp/sdk";
 import type { ChatInstance } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
@@ -162,7 +163,7 @@ describe("LinqAdapter.parseMessage", () => {
     const message = adapter.parseMessage(payload.data);
 
     expect(message.text).toBe("hi");
-    expect(message.raw.reply_to).toEqual({
+    expect((message.raw as LinqAPIV3.MessageEventV2).reply_to).toEqual({
       message_id: "9135965d-42ed-43bc-a1f5-793426b1aefd",
       part_index: 0,
     });
@@ -172,7 +173,7 @@ describe("LinqAdapter.parseMessage", () => {
     const adapter = createTestAdapter();
     vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
 
-    const message = adapter.parseMessage({
+    const rawMessage: LinqAPIV3.Message = {
       id: "retrieved-message-id",
       chat_id: "chat-123",
       created_at: "2026-05-08T16:21:12.499Z",
@@ -187,7 +188,9 @@ describe("LinqAdapter.parseMessage", () => {
         joined_at: "2026-04-17T17:26:38.725846Z",
         service: "iMessage",
       },
-    });
+    };
+
+    const message = adapter.parseMessage(rawMessage);
 
     expect(message.text).toBe("edited text");
     expect(message.metadata.edited).toBe(true);
@@ -313,7 +316,7 @@ describe("LinqAdapter.stream", () => {
           created_at: "2026-05-08T16:22:00.000Z",
           delivery_status: "queued",
           is_read: false,
-          parts: [{ type: "text", value: "Hello world" }],
+          parts: [{ type: "text", value: "Hello world", reactions: null }],
           sent_at: null,
         },
       },
@@ -382,7 +385,7 @@ function createSignedRequest(
   });
 }
 
-function createMessageReceivedPayload() {
+function createMessageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
   return {
     api_version: "v3",
     webhook_version: "2026-02-03",
