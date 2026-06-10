@@ -19,10 +19,11 @@ import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import {
   isMessageReceivedWebhookEvent,
+  isReactionWebhookEvent,
   parseLinqMessage,
   type LinqRawMessage,
 } from "./message-parser.js";
-import { toLinqReaction } from "./reactions.js";
+import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
 
 type LinqThreadId = {
@@ -309,9 +310,62 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       };
 
       this.chat.processMessage(this, threadId, factory, options);
+    } else if (this.chat && isReactionWebhookEvent(event)) {
+      this.processReactionWebhook(this.chat, event, options);
     }
 
     return new Response("OK", { status: 200 });
+  }
+
+  private processReactionWebhook(
+    chat: ChatInstance,
+    event:
+      | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
+      | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent,
+    options?: WebhookOptions,
+  ): void {
+    const { chat_id: chatId, message_id: messageId } = event.data;
+
+    if (!chatId || !messageId) {
+      this.logger.debug(`Ignoring Linq ${event.event_type} webhook without chat/message ID`);
+
+      return;
+    }
+
+    const reaction = fromLinqReaction(event.data);
+
+    if (!reaction) {
+      this.logger.debug(
+        `Ignoring Linq ${event.event_type} webhook with unsupported reaction type ${event.data.reaction_type}`,
+      );
+
+      return;
+    }
+
+    const handle = event.data.from_handle;
+    const isMe = event.data.is_from_me || handle?.is_me === true;
+    const senderId = handle?.id || handle?.handle || event.data.from || "unknown";
+    const senderName = handle?.handle || event.data.from || senderId;
+
+    chat.processReaction(
+      {
+        adapter: this,
+        added: event.event_type === "reaction.added",
+        emoji: reaction.emoji,
+        rawEmoji: reaction.rawEmoji,
+        messageId,
+        threadId: this.encodeThreadId({ chatId }),
+        raw: event,
+        user: {
+          userId: senderId,
+          userName: senderName,
+          fullName: senderName,
+          isBot: isMe,
+          isMe,
+        },
+      },
+      options,
+    );
   }
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {

@@ -75,6 +75,14 @@ export function isMessageReceivedWebhookEvent(
   return event.event_type === "message.received";
 }
 
+export function isReactionWebhookEvent(
+  event: LinqAPIV3.EventsWebhookEvent,
+): event is
+  | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
+  | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent {
+  return event.event_type === "reaction.added" || event.event_type === "reaction.removed";
+}
+
 function normalizeMessage(value: LinqRawMessage): {
   id: string;
   chatId: string;

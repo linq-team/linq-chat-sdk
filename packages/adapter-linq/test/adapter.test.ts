@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { LinqAPIV3 } from "@linqapp/sdk";
+import { getEmoji } from "chat";
 import type { ChatInstance } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
@@ -103,6 +104,90 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(retrieve).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
     expect(adapter.isDM("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc")).toBe(false);
     expect(processMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatches reaction.added webhooks to Chat SDK", async () => {
+    const adapter = createTestAdapter();
+    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processReaction"> }).chat = {
+      processReaction,
+    };
+
+    const response = await adapter.handleWebhook(createSignedRequest(createReactionPayload()));
+
+    expect(response.status).toBe(200);
+    expect(processReaction).toHaveBeenCalledTimes(1);
+    expect(processReaction).toHaveBeenCalledWith(
+      {
+        adapter,
+        added: true,
+        emoji: getEmoji("thumbs_up"),
+        rawEmoji: "like",
+        messageId: "e230c922-3e96-4376-9332-67b644d11237",
+        threadId: "linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+        raw: expect.objectContaining({ event_type: "reaction.added" }),
+        user: {
+          userId: "1fcfb06a-99d6-4df5-9e26-d8a5b1be24ed",
+          userName: "+15550002000",
+          fullName: "+15550002000",
+          isBot: false,
+          isMe: false,
+        },
+      },
+      undefined,
+    );
+  });
+
+  it("dispatches reaction.removed webhooks as removed reactions", async () => {
+    const adapter = createTestAdapter();
+    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processReaction"> }).chat = {
+      processReaction,
+    };
+
+    const response = await adapter.handleWebhook(
+      createSignedRequest(createReactionPayload("reaction.removed", { reaction_type: "love" })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(processReaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        added: false,
+        emoji: getEmoji("heart"),
+        rawEmoji: "love",
+      }),
+      undefined,
+    );
+  });
+
+  it("ignores reaction webhooks without an emoji equivalent", async () => {
+    const adapter = createTestAdapter();
+    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processReaction"> }).chat = {
+      processReaction,
+    };
+
+    const response = await adapter.handleWebhook(
+      createSignedRequest(createReactionPayload("reaction.added", { reaction_type: "sticker" })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(processReaction).not.toHaveBeenCalled();
+  });
+
+  it("ignores reaction webhooks without chat or message IDs", async () => {
+    const adapter = createTestAdapter();
+    const processReaction = vi.fn((..._args: Parameters<ChatInstance["processReaction"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processReaction"> }).chat = {
+      processReaction,
+    };
+
+    const response = await adapter.handleWebhook(
+      createSignedRequest(createReactionPayload("reaction.added", { message_id: undefined })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(processReaction).not.toHaveBeenCalled();
   });
 });
 
@@ -548,6 +633,40 @@ function createMessageReceivedPayload(): LinqAPIV3.MessageReceivedWebhookEvent {
       },
       idempotency_key: null,
       preferred_service: null,
+    },
+  };
+}
+
+function createReactionPayload(
+  eventType: "reaction.added" | "reaction.removed" = "reaction.added",
+  data: Partial<LinqAPIV3.Webhooks.ReactionEventBase> = {},
+): LinqAPIV3.ReactionAddedWebhookEvent | LinqAPIV3.ReactionRemovedWebhookEvent {
+  return {
+    api_version: "v3",
+    webhook_version: "2026-02-03",
+    event_type: eventType,
+    event_id: "0b9a37e2-66cf-4f4f-9a3f-1f0a2b8e8d11",
+    created_at: "2026-05-08T16:25:00.000000000Z",
+    trace_id: "f3c1a76b8d2e4f50a1b2c3d4e5f60718",
+    partner_id: "7ac8224b-c41a-54fb-96ed-e28a94f97ff6",
+    data: {
+      is_from_me: false,
+      reaction_type: "like",
+      chat_id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+      message_id: "e230c922-3e96-4376-9332-67b644d11237",
+      part_index: 0,
+      reacted_at: "2026-05-08T16:25:00.000Z",
+      service: "iMessage",
+      from_handle: {
+        id: "1fcfb06a-99d6-4df5-9e26-d8a5b1be24ed",
+        is_me: false,
+        handle: "+15550002000",
+        status: "active",
+        left_at: null,
+        service: "iMessage",
+        joined_at: "2026-04-17T17:26:38.725846Z",
+      },
+      ...data,
     },
   };
 }

@@ -17,6 +17,7 @@ The adapter can already handle the core receive/reply path:
 - Edit text messages with `messages.update()`.
 - Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
+- Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:<chatId>`) so webhook and API paths map to the same thread.
 - Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:<chatId>:dm/group` IDs still decode).
 - Resolve unknown chat identity via `chats.retrieve()` before dispatching webhooks that omit `is_group`.
@@ -77,18 +78,16 @@ Likely areas to check:
 
 ### 3. Inbound reaction webhooks
 
-Status: **not implemented**
+Status: **implemented**
 
-Outbound add/remove reactions work.
+Outbound add/remove reactions work, and inbound `reaction.added` / `reaction.removed` webhooks now dispatch into `chat.processReaction()`.
 
-Inbound reaction events are not routed into Chat SDK yet.
+Linq-specific notes:
 
-Future support should subscribe to:
-
-- `reaction.added`
-- `reaction.removed`
-
-Then map those webhooks into `chat.processReaction()`.
+- Standard tapbacks (like, dislike, love, laugh, emphasize, question) map to normalized Chat SDK emoji.
+- Custom emoji reactions resolve through the default emoji resolver, falling back to the raw emoji.
+- Sticker reactions are skipped — Chat SDK has no emoji equivalent.
+- Reaction webhooks missing `chat_id` or `message_id` are acknowledged but not dispatched.
 
 ## Will not implement
 
