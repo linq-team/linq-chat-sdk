@@ -59,6 +59,51 @@ describe("LinqAdapter.handleWebhook", () => {
       undefined,
     );
   });
+
+  it("dispatches a stable thread ID and learns DM identity from the webhook", async () => {
+    const adapter = createTestAdapter();
+    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
+      processMessage,
+    };
+
+    const response = await adapter.handleWebhook(
+      createSignedRequest(createMessageReceivedPayload()),
+    );
+
+    expect(response.status).toBe(200);
+    expect(processMessage).toHaveBeenCalledWith(
+      adapter,
+      "linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+      expect.any(Function),
+      undefined,
+    );
+    expect(adapter.isDM("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc")).toBe(true);
+  });
+
+  it("resolves chat identity from the API when the webhook omits is_group", async () => {
+    const adapter = createTestAdapter();
+    const processMessage = vi.fn((..._args: Parameters<ChatInstance["processMessage"]>) => {});
+    (adapter as unknown as { chat: Pick<ChatInstance, "processMessage"> }).chat = {
+      processMessage,
+    };
+    const retrieve = vi
+      .fn()
+      .mockResolvedValue({ id: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc", is_group: true });
+    (adapter as unknown as { apiClient: { chats: { retrieve: typeof retrieve } } }).apiClient = {
+      chats: { retrieve },
+    };
+
+    const payload = createMessageReceivedPayload();
+    payload.data.chat.is_group = undefined;
+
+    const response = await adapter.handleWebhook(createSignedRequest(payload));
+
+    expect(response.status).toBe(200);
+    expect(retrieve).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
+    expect(adapter.isDM("linq:3caaf1a0-ef9f-46e0-8c22-31e82c8514dc")).toBe(false);
+    expect(processMessage).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("LinqAdapter.parseMessage", () => {
@@ -339,14 +384,78 @@ describe("LinqAdapter.channelIdFromThreadId", () => {
   });
 });
 
-describe("LinqAdapter.isDM", () => {
-  it("treats Linq chat threads as DMs", () => {
+describe("LinqAdapter thread IDs", () => {
+  it("encodes a stable thread ID without group/dm metadata", () => {
     const adapter = createTestAdapter();
 
-    expect(adapter.isDM("linq:chat-123")).toBe(true);
+    expect(adapter.encodeThreadId({ chatId: "chat-123" })).toBe("linq:chat-123");
+    expect(adapter.encodeThreadId({ chatId: "chat-123", isGroup: true })).toBe("linq:chat-123");
+    expect(adapter.encodeThreadId({ chatId: "chat-123", isGroup: false })).toBe("linq:chat-123");
   });
 
-  it("detects group chats from encoded thread IDs", () => {
+  it("round-trips encoded thread IDs", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.decodeThreadId(adapter.encodeThreadId({ chatId: "chat-123" }))).toMatchObject({
+      chatId: "chat-123",
+    });
+  });
+
+  it("remembers group/dm identity seen while encoding", () => {
+    const adapter = createTestAdapter();
+
+    adapter.encodeThreadId({ chatId: "chat-group", isGroup: true });
+    adapter.encodeThreadId({ chatId: "chat-dm", isGroup: false });
+
+    expect(adapter.decodeThreadId("linq:chat-group")).toEqual({
+      chatId: "chat-group",
+      isGroup: true,
+    });
+    expect(adapter.decodeThreadId("linq:chat-dm")).toEqual({ chatId: "chat-dm", isGroup: false });
+  });
+
+  it("decodes legacy group/dm thread IDs", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.decodeThreadId("linq:chat-123:group")).toEqual({
+      chatId: "chat-123",
+      isGroup: true,
+    });
+    expect(adapter.decodeThreadId("linq:chat-123:dm")).toEqual({
+      chatId: "chat-123",
+      isGroup: false,
+    });
+  });
+
+  it("rejects malformed thread IDs", () => {
+    const adapter = createTestAdapter();
+
+    expect(() => adapter.decodeThreadId("slack:chat-123")).toThrow("Invalid Linq thread ID");
+    expect(() => adapter.decodeThreadId("linq:")).toThrow("Invalid Linq thread ID");
+    expect(() => adapter.decodeThreadId("linq:chat-123:nonsense")).toThrow(
+      "Invalid Linq thread ID",
+    );
+  });
+});
+
+describe("LinqAdapter.isDM", () => {
+  it("treats unknown chats as non-DMs until identity is known", () => {
+    const adapter = createTestAdapter();
+
+    expect(adapter.isDM("linq:chat-123")).toBe(false);
+  });
+
+  it("detects DMs and groups learned from encoding", () => {
+    const adapter = createTestAdapter();
+
+    adapter.encodeThreadId({ chatId: "chat-group", isGroup: true });
+    adapter.encodeThreadId({ chatId: "chat-dm", isGroup: false });
+
+    expect(adapter.isDM("linq:chat-group")).toBe(false);
+    expect(adapter.isDM("linq:chat-dm")).toBe(true);
+  });
+
+  it("detects DMs and groups from legacy thread IDs", () => {
     const adapter = createTestAdapter();
 
     expect(adapter.isDM("linq:chat-123:group")).toBe(false);

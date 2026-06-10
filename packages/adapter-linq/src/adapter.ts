@@ -46,6 +46,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
+  // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
+  private readonly chatKinds = new Map<string, boolean>();
 
   constructor(config: LinqAdapterConfig) {
     this.apiClient = new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL });
@@ -59,12 +61,16 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Thread ID
+  //
+  // The encoded form is always `linq:{chatId}` so the same Linq chat maps to the
+  // same Chat SDK thread no matter which path (webhook, fetch, send) produced it.
+  // Group/DM identity lives in `chatKinds` instead of the thread ID.
   encodeThreadId(platformData: LinqThreadId): string {
-    if (platformData.isGroup === undefined) {
-      return `linq:${platformData.chatId}`;
+    if (platformData.isGroup !== undefined) {
+      this.chatKinds.set(platformData.chatId, platformData.isGroup);
     }
 
-    return `linq:${platformData.chatId}:${platformData.isGroup ? "group" : "dm"}`;
+    return `linq:${platformData.chatId}`;
   }
 
   decodeThreadId(threadId: string): LinqThreadId {
@@ -74,15 +80,20 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new Error(`Invalid Linq thread ID: ${threadId}`);
     }
 
-    if (kind === "group") {
-      return { chatId, isGroup: true };
+    // Older adapter versions encoded group/dm into the thread ID. Keep decoding
+    // those so persisted thread IDs survive the format change.
+    if (kind === "group" || kind === "dm") {
+      const isGroup = kind === "group";
+      this.chatKinds.set(chatId, isGroup);
+
+      return { chatId, isGroup };
     }
 
-    if (kind === "dm") {
-      return { chatId, isGroup: false };
+    if (kind !== undefined) {
+      throw new Error(`Invalid Linq thread ID: ${threadId}`);
     }
 
-    return { chatId };
+    return { chatId, isGroup: this.chatKinds.get(chatId) };
   }
 
   // Messages
@@ -274,10 +285,22 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
-      const threadId = this.encodeThreadId({
-        chatId: event.data.chat.id,
-        isGroup: event.data.chat.is_group ?? undefined,
-      });
+      const chatId = event.data.chat.id;
+      const isGroup = event.data.chat.is_group ?? undefined;
+
+      // isDM() only trusts known chats, so resolve group/DM identity before
+      // dispatching when the webhook does not carry it.
+      if (isGroup === undefined && !this.chatKinds.has(chatId)) {
+        try {
+          const chat = await this.apiClient.chats.retrieve(chatId);
+
+          this.chatKinds.set(chatId, chat.is_group);
+        } catch (error) {
+          this.logger.warn(`Failed to resolve Linq chat kind for ${chatId}`, { error });
+        }
+      }
+
+      const threadId = this.encodeThreadId({ chatId, isGroup });
 
       const factory = async (): Promise<Message<unknown>> => {
         const msg = this.parseMessage(event.data);
@@ -305,7 +328,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   isDM(threadId: string): boolean {
-    return this.decodeThreadId(threadId).isGroup !== true;
+    // Only report a DM when we have seen the chat and know it is not a group.
+    // Webhooks always carry `is_group`, so this is warm before handlers run.
+    return this.decodeThreadId(threadId).isGroup === false;
   }
 }
 

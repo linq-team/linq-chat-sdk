@@ -17,9 +17,9 @@ The adapter can already handle the core receive/reply path:
 - Edit text messages with `messages.update()`.
 - Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
-- Cache direct-message vs group-chat metadata in new thread IDs.
-- Detect direct-message vs group-chat threads from encoded metadata.
-- Encode Linq thread IDs with Chat SDK-compatible colon prefixes (`linq:<chatId>:dm/group`).
+- Encode stable Linq thread IDs (`linq:<chatId>`) so webhook and API paths map to the same thread.
+- Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:<chatId>:dm/group` IDs still decode).
+- Resolve unknown chat identity via `chats.retrieve()` before dispatching webhooks that omit `is_group`.
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
 - Automatically subscribe and respond to inbound Linq group chats received through webhooks.
