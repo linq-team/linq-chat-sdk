@@ -1,6 +1,30 @@
 {
-  "name": "@linq-chat-sdk/adapter-linq",
-  "version": "0.0.0",
+  "name": "@linqapp/chat-sdk-adapter",
+  "version": "0.1.0",
+  "description": "Linq adapter for Chat SDK — build chatbots that talk over iMessage and SMS",
+  "license": "Apache-2.0",
+  "author": "Linq <support@linq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linq-team/linq-chat-sdk.git",
+    "directory": "packages/adapter-linq"
+  },
+  "homepage": "https://github.com/linq-team/linq-chat-sdk/tree/main/packages/adapter-linq#readme",
+  "bugs": {
+    "url": "https://github.com/linq-team/linq-chat-sdk/issues"
+  },
+  "keywords": [
+    "linq",
+    "imessage",
+    "sms",
+    "chat",
+    "chatbot",
+    "chat-sdk",
+    "adapter"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],

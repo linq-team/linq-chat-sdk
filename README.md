@@ -4,7 +4,7 @@
 
 ## What's in here
 
-- [`packages/adapter-linq`](packages/adapter-linq) — the adapter package (`@linq-chat-sdk/adapter-linq`). Start with its [README](packages/adapter-linq/README.md).
+- [`packages/adapter-linq`](packages/adapter-linq) — the adapter package (`@linqapp/chat-sdk-adapter`). Start with its [README](packages/adapter-linq/README.md).
 - [`apps/api`](apps/api) — example Nitro app running a single AI bot across Linq, Telegram, and WhatsApp, with webhook routes, setup endpoints, and a small admin UI.
 
 ## Development
@@ -16,3 +16,7 @@ pnpm -r typecheck
 ```
 
 The adapter package has no runtime dependencies beyond the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk), with `chat` as a peer dependency.
+
+## License
+
+[Apache-2.0](LICENSE)

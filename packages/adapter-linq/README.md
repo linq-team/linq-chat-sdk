@@ -1,17 +1,17 @@
-# @linq-chat-sdk/adapter-linq
+# @linqapp/chat-sdk-adapter
 
 [Linq](https://linqapp.com) adapter for [Chat SDK](https://www.npmjs.com/package/chat) (`chat`). Build agentic chatbots that talk over iMessage and SMS through Linq, using the same handler code you'd write for Slack, Telegram, or WhatsApp.
 
 ## Install
 
 ```bash
-npm install @linq-chat-sdk/adapter-linq chat
+npm install @linqapp/chat-sdk-adapter chat
 ```
 
 ## Quick start
 
 ```ts
-import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq";
+import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
 import { Chat } from "chat";
 
 const chat = new Chat({
@@ -109,3 +109,7 @@ pnpm build
 ```
 
 A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters into one bot) lives in [`apps/api`](../../apps/api) in this repo.
+
+## License
+
+[Apache-2.0](../../LICENSE)
