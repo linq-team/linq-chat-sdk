@@ -3,6 +3,7 @@ import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "
 import type {
   Adapter,
   AdapterPostableMessage,
+  Attachment,
   ChatInstance,
   EmojiValue,
   FetchOptions,
@@ -23,8 +24,14 @@ import {
   parseLinqMessage,
   type LinqRawMessage,
 } from "./message-parser.js";
+import { buildLinqMediaParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
+
+type LinqOutboundPart =
+  | { type: "text"; value: string }
+  | { type: "media"; url: string }
+  | { type: "media"; attachment_id: string };
 
 type LinqThreadId = {
   chatId: string;
@@ -144,15 +151,24 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
     const text = this.converter.renderPostable(message).trim();
+    const mediaParts = await buildLinqMediaParts(this.apiClient, message);
 
-    if (!text) {
-      throw new Error("Linq message text cannot be empty.");
+    const parts: LinqOutboundPart[] = [];
+
+    // Text leads so the message reads as [text, media, ...]; Linq disallows
+    // consecutive text parts but is fine with a single text part before media.
+    if (text) {
+      parts.push({ type: "text", value: text });
+    }
+
+    parts.push(...mediaParts);
+
+    if (parts.length === 0) {
+      throw new Error("Linq message must include text or media.");
     }
 
     const response = await this.apiClient.chats.messages.send(chatId, {
-      message: {
-        parts: [{ type: "text", value: text }],
-      },
+      message: { parts },
     });
 
     return {
@@ -370,6 +386,30 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
     return parseLinqMessage(raw, (platformData) => this.encodeThreadId(platformData));
+  }
+
+  // Rebuild fetchData after an attachment is serialized to the queue and back.
+  // Linq media lives on permanent cdn.linqapp.com URLs, so the stored URL is all
+  // we need to re-download.
+  rehydrateAttachment(attachment: Attachment): Attachment {
+    const url = attachment.fetchMetadata?.url ?? attachment.url;
+
+    if (!url) {
+      return attachment;
+    }
+
+    return {
+      ...attachment,
+      fetchData: async () => {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch Linq attachment ${url}: ${response.status}`);
+        }
+
+        return Buffer.from(await response.arrayBuffer());
+      },
+    };
   }
 
   // Random

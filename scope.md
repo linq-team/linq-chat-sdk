@@ -64,17 +64,20 @@ Still missing:
 
 ### 2. Outbound attachments and media
 
-Status: **not implemented**
+Status: **implemented**
 
-Current `postMessage()` sends text only.
+`postMessage()` maps Chat SDK `attachments` and `files` to Linq media parts:
 
-Future support should map Chat SDK attachments/files to Linq media parts.
+- Public HTTPS URLs ≤ 10MB are sent by reference (Linq downloads on send) — no upload round-trip, so forwarding inbound Linq media is free.
+- Raw bytes, non-HTTPS URLs, and files > 10MB are pre-uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
+- Messages can be media-only (no text); text leads the parts array so ordering is `[text, media, ...]`.
 
-Likely areas to check:
+Inbound attachments survive queue serialization via `rehydrateAttachment` (Linq CDN URLs are permanent).
 
-- Linq attachment upload/create endpoints
-- Linq media part requirements
-- file size and MIME type limits
+Still missing:
+
+- iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
+- `idempotency_key` on sends to dedupe app-level retries
 
 ### 3. Inbound reaction webhooks
 

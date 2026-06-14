@@ -67,6 +67,7 @@ Other event types are acknowledged with a `200` and ignored.
 | Outbound text messages                             | ✅                                                                                                                                 |
 | Group chats                                        | ✅ reply to existing groups received via webhook                                                                                   |
 | Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                                    |
+| Outbound media / file sending                      | ✅ `attachments` and `files` on a message become media parts                                                                       |
 | Inbound reactions (tapbacks + custom emoji)        | ✅ dispatch to `onReaction()`                                                                                                      |
 | Outbound reactions (add/remove)                    | ✅                                                                                                                                 |
 | Edit message                                       | ✅ text, first part only                                                                                                           |
@@ -74,7 +75,6 @@ Other event types are acknowledged with a `200` and ignored.
 | Typing indicators                                  | ✅ DMs only (Linq rejects typing in groups)                                                                                        |
 | Webhook signature verification + replay protection | ✅                                                                                                                                 |
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
-| Outbound media / file sending                      | 🚧 not yet                                                                                                                         |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
 | `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
@@ -83,6 +83,30 @@ Other event types are acknowledged with a `200` and ignored.
 ## Thread IDs
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
+
+## Attachments
+
+Attach media by putting `attachments` or `files` on a message:
+
+```ts
+await thread.post({
+  markdown: "here's the report 📎",
+  attachments: [{ type: "file", url: "https://example.com/report.pdf", mimeType: "application/pdf" }],
+});
+
+// or send raw bytes
+await thread.post({
+  markdown: "fresh render",
+  files: [{ filename: "render.png", mimeType: "image/png", data: pngBuffer }],
+});
+```
+
+How each attachment is delivered:
+
+- **Public HTTPS URL, ≤ 10MB** — sent by reference; Linq downloads it on send. No upload round-trip, so forwarding inbound Linq media (already on `cdn.linqapp.com`) is free.
+- **Raw bytes, non-HTTPS URLs, or files > 10MB** — uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
+
+A message can be media-only (no text). Inbound attachments expose `fetchData()` to download, and survive queue serialization via `rehydrateAttachment` (Linq CDN URLs don't expire). Audio is sent as a downloadable file attachment — the dedicated iMessage voice-memo bubble endpoint isn't wired up yet.
 
 ## Reactions
 

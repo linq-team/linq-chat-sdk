@@ -208,6 +208,9 @@ function toAttachment(part: LinqMediaMessagePart): Attachment {
     size: part.size_bytes,
     width: part.width ?? part.width_px,
     height: part.height ?? part.height_px,
+    // Linq media URLs are permanent (cdn.linqapp.com), so the URL is enough to
+    // rebuild fetchData after the message is serialized to the queue and back.
+    fetchMetadata: { url: part.url },
     fetchData: async () => {
       const response = await fetch(part.url);
 

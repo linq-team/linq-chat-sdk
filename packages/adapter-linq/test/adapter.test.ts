@@ -381,8 +381,221 @@ describe("LinqAdapter.postMessage", () => {
     vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-id" });
 
     await expect(adapter.postMessage("linq:chat-id", "   ")).rejects.toThrow(
-      "Linq message text cannot be empty.",
+      "Linq message must include text or media.",
     );
+  });
+});
+
+describe("LinqAdapter outbound media", () => {
+  it("forwards a public HTTPS attachment as a media part by URL", async () => {
+    const adapter = createTestAdapter();
+    const send = vi.fn().mockResolvedValue(createSendResponse());
+    const create = vi.fn();
+    (
+      adapter as unknown as {
+        apiClient: {
+          chats: { messages: { send: typeof send } };
+          attachments: { create: typeof create };
+        };
+      }
+    ).apiClient = {
+      chats: { messages: { send } },
+      attachments: { create },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-123" });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    try {
+      await adapter.postMessage("linq:chat-123", {
+        markdown: "check this out",
+        attachments: [
+          { type: "image", url: "https://cdn.linqapp.com/photo.jpg", mimeType: "image/jpeg" },
+        ],
+      });
+
+      expect(create).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledWith("chat-123", {
+        message: {
+          parts: [
+            { type: "text", value: "check this out" },
+            { type: "media", url: "https://cdn.linqapp.com/photo.jpg" },
+          ],
+        },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("pre-uploads binary attachment data and sends it by attachment_id", async () => {
+    const adapter = createTestAdapter();
+    const send = vi.fn().mockResolvedValue(createSendResponse());
+    const create = vi.fn().mockResolvedValue({
+      attachment_id: "att-789",
+      upload_url: "https://uploads.linqapp.com/put/att-789",
+      http_method: "PUT",
+      required_headers: { "content-type": "image/png" },
+      download_url: "https://cdn.linqapp.com/att-789.png",
+      expires_at: "2026-06-14T00:15:00.000Z",
+    });
+    (
+      adapter as unknown as {
+        apiClient: {
+          chats: { messages: { send: typeof send } };
+          attachments: { create: typeof create };
+        };
+      }
+    ).apiClient = {
+      chats: { messages: { send } },
+      attachments: { create },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-123" });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    try {
+      await adapter.postMessage("linq:chat-123", {
+        markdown: "here",
+        attachments: [
+          { type: "image", name: "pic.png", mimeType: "image/png", data: Buffer.from("img-bytes") },
+        ],
+      });
+
+      expect(create).toHaveBeenCalledWith({
+        filename: "pic.png",
+        content_type: "image/png",
+        size_bytes: Buffer.from("img-bytes").byteLength,
+      });
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://uploads.linqapp.com/put/att-789",
+        expect.objectContaining({ method: "PUT", headers: { "content-type": "image/png" } }),
+      );
+      expect(send).toHaveBeenCalledWith("chat-123", {
+        message: {
+          parts: [
+            { type: "text", value: "here" },
+            { type: "media", attachment_id: "att-789" },
+          ],
+        },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("sends a media-only message when there is no text", async () => {
+    const adapter = createTestAdapter();
+    const send = vi.fn().mockResolvedValue(createSendResponse());
+    (
+      adapter as unknown as { apiClient: { chats: { messages: { send: typeof send } } } }
+    ).apiClient = {
+      chats: { messages: { send } },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-123" });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+
+    await adapter.postMessage("linq:chat-123", {
+      markdown: "",
+      attachments: [
+        { type: "image", url: "https://cdn.linqapp.com/photo.jpg", mimeType: "image/jpeg" },
+      ],
+    });
+
+    expect(send).toHaveBeenCalledWith("chat-123", {
+      message: {
+        parts: [{ type: "media", url: "https://cdn.linqapp.com/photo.jpg" }],
+      },
+    });
+  });
+
+  it("pre-uploads an oversized HTTPS attachment instead of sending its URL", async () => {
+    const adapter = createTestAdapter();
+    const send = vi.fn().mockResolvedValue(createSendResponse());
+    const create = vi.fn().mockResolvedValue({
+      attachment_id: "att-big",
+      upload_url: "https://uploads.linqapp.com/put/att-big",
+      http_method: "PUT",
+      required_headers: { "content-type": "video/mp4" },
+      download_url: "https://cdn.linqapp.com/att-big.mp4",
+      expires_at: "2026-06-14T00:15:00.000Z",
+    });
+    (
+      adapter as unknown as {
+        apiClient: {
+          chats: { messages: { send: typeof send } };
+          attachments: { create: typeof create };
+        };
+      }
+    ).apiClient = {
+      chats: { messages: { send } },
+      attachments: { create },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({ chatId: "chat-123" });
+    vi.spyOn(adapter, "encodeThreadId").mockReturnValue("linq:chat-123");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input: unknown) => {
+      if (input === "https://cdn.linqapp.com/clip.mp4") {
+        return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
+      }
+
+      return new Response(null, { status: 200 });
+    });
+
+    try {
+      await adapter.postMessage("linq:chat-123", {
+        markdown: "",
+        attachments: [
+          {
+            type: "video",
+            url: "https://cdn.linqapp.com/clip.mp4",
+            mimeType: "video/mp4",
+            size: 25 * 1024 * 1024,
+          },
+        ],
+      });
+
+      // Downloaded from the source URL, then uploaded for an attachment_id.
+      expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/clip.mp4");
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith("chat-123", {
+        message: { parts: [{ type: "media", attachment_id: "att-big" }] },
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
+describe("LinqAdapter.rehydrateAttachment", () => {
+  it("rebuilds fetchData from the stored URL after serialization", async () => {
+    const adapter = createTestAdapter();
+    const rehydrated = adapter.rehydrateAttachment({
+      type: "image",
+      url: "https://cdn.linqapp.com/photo.jpg",
+      fetchMetadata: { url: "https://cdn.linqapp.com/photo.jpg" },
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Uint8Array([7, 8, 9]), { status: 200 }));
+
+    try {
+      const data = await rehydrated.fetchData?.();
+
+      expect(fetchSpy).toHaveBeenCalledWith("https://cdn.linqapp.com/photo.jpg");
+      expect(data).toEqual(Buffer.from([7, 8, 9]));
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("returns the attachment unchanged when there is no URL to rebuild from", () => {
+    const adapter = createTestAdapter();
+    const attachment = { type: "file" as const, name: "mystery.bin" };
+
+    expect(adapter.rehydrateAttachment(attachment)).toBe(attachment);
   });
 });
 
@@ -550,6 +763,20 @@ describe("LinqAdapter.isDM", () => {
 
 function createTestAdapter() {
   return createLinqAdapter({ apiKey: API_KEY, signingSecret: SIGNING_SECRET });
+}
+
+function createSendResponse() {
+  return {
+    chat_id: "chat-123",
+    message: {
+      id: "outbound-message-id",
+      created_at: "2026-06-14T00:00:00.000Z",
+      delivery_status: "queued",
+      is_read: false,
+      parts: [{ type: "text", value: "ok" }],
+      sent_at: null,
+    },
+  };
 }
 
 async function* createTestStream() {
