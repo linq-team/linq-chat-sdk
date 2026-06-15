@@ -17,9 +17,10 @@ The adapter can already handle the core receive/reply path:
 - Edit text messages with `messages.update()`.
 - Render formatted Chat SDK content as markdown text.
 - Add and remove reactions with `messages.addReaction()`.
-- Cache direct-message vs group-chat metadata in new thread IDs.
-- Detect direct-message vs group-chat threads from encoded metadata.
-- Encode Linq thread IDs with Chat SDK-compatible colon prefixes (`linq:<chatId>:dm/group`).
+- Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
+- Encode stable Linq thread IDs (`linq:<chatId>`) so webhook and API paths map to the same thread.
+- Track direct-message vs group-chat identity in-memory from webhooks and chat fetches (legacy `linq:<chatId>:dm/group` IDs still decode).
+- Resolve unknown chat identity via `chats.retrieve()` before dispatching webhooks that omit `is_group`.
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
 - Automatically subscribe and respond to inbound Linq group chats received through webhooks.
@@ -63,32 +64,33 @@ Still missing:
 
 ### 2. Outbound attachments and media
 
-Status: **not implemented**
+Status: **implemented**
 
-Current `postMessage()` sends text only.
+`postMessage()` maps Chat SDK `attachments` and `files` to Linq media parts:
 
-Future support should map Chat SDK attachments/files to Linq media parts.
+- Public HTTPS URLs ≤ 10MB are sent by reference (Linq downloads on send) — no upload round-trip, so forwarding inbound Linq media is free.
+- Raw bytes, non-HTTPS URLs, and files > 10MB are pre-uploaded via `POST /v3/attachments` (up to 100MB) and sent by `attachment_id`.
+- Messages can be media-only (no text); text leads the parts array so ordering is `[text, media, ...]`.
 
-Likely areas to check:
+Inbound attachments survive queue serialization via `rehydrateAttachment` (Linq CDN URLs are permanent).
 
-- Linq attachment upload/create endpoints
-- Linq media part requirements
-- file size and MIME type limits
+Still missing:
+
+- iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
+- `idempotency_key` on sends to dedupe app-level retries
 
 ### 3. Inbound reaction webhooks
 
-Status: **not implemented**
+Status: **implemented**
 
-Outbound add/remove reactions work.
+Outbound add/remove reactions work, and inbound `reaction.added` / `reaction.removed` webhooks now dispatch into `chat.processReaction()`.
 
-Inbound reaction events are not routed into Chat SDK yet.
+Linq-specific notes:
 
-Future support should subscribe to:
-
-- `reaction.added`
-- `reaction.removed`
-
-Then map those webhooks into `chat.processReaction()`.
+- Standard tapbacks (like, dislike, love, laugh, emphasize, question) map to normalized Chat SDK emoji.
+- Custom emoji reactions resolve through the default emoji resolver, falling back to the raw emoji.
+- Sticker reactions are skipped — Chat SDK has no emoji equivalent.
+- Reaction webhooks missing `chat_id` or `message_id` are acknowledged but not dispatched.
 
 ## Will not implement
 

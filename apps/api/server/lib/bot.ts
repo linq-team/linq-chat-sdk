@@ -1,4 +1,4 @@
-import { createLinqAdapter } from "@linq-chat-sdk/adapter-linq";
+import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
 import { createPostgresState } from "@chat-adapter/state-pg";
 import { createTelegramAdapter } from "@chat-adapter/telegram";
 import { createWhatsAppAdapter } from "@chat-adapter/whatsapp";

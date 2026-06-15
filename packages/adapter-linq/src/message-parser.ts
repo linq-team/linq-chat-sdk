@@ -75,6 +75,14 @@ export function isMessageReceivedWebhookEvent(
   return event.event_type === "message.received";
 }
 
+export function isReactionWebhookEvent(
+  event: LinqAPIV3.EventsWebhookEvent,
+): event is
+  | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
+  | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent {
+  return event.event_type === "reaction.added" || event.event_type === "reaction.removed";
+}
+
 function normalizeMessage(value: LinqRawMessage): {
   id: string;
   chatId: string;
@@ -200,6 +208,9 @@ function toAttachment(part: LinqMediaMessagePart): Attachment {
     size: part.size_bytes,
     width: part.width ?? part.width_px,
     height: part.height ?? part.height_px,
+    // Linq media URLs are permanent (cdn.linqapp.com), so the URL is enough to
+    // rebuild fetchData after the message is serialized to the queue and back.
+    fetchMetadata: { url: part.url },
     fetchData: async () => {
       const response = await fetch(part.url);
 

@@ -3,6 +3,7 @@ import { ConsoleLogger, Message, NotImplementedError, stringifyMarkdown } from "
 import type {
   Adapter,
   AdapterPostableMessage,
+  Attachment,
   ChatInstance,
   EmojiValue,
   FetchOptions,
@@ -19,11 +20,18 @@ import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import {
   isMessageReceivedWebhookEvent,
+  isReactionWebhookEvent,
   parseLinqMessage,
   type LinqRawMessage,
 } from "./message-parser.js";
-import { toLinqReaction } from "./reactions.js";
+import { buildLinqMediaParts } from "./outbound-media.js";
+import { fromLinqReaction, toLinqReaction } from "./reactions.js";
 import { verifyLinqWebhookRequest } from "./verification.js";
+
+type LinqOutboundPart =
+  | { type: "text"; value: string }
+  | { type: "media"; url: string }
+  | { type: "media"; attachment_id: string };
 
 type LinqThreadId = {
   chatId: string;
@@ -46,6 +54,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
+  // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
+  private readonly chatKinds = new Map<string, boolean>();
 
   constructor(config: LinqAdapterConfig) {
     this.apiClient = new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL });
@@ -59,12 +69,16 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   // Thread ID
+  //
+  // The encoded form is always `linq:{chatId}` so the same Linq chat maps to the
+  // same Chat SDK thread no matter which path (webhook, fetch, send) produced it.
+  // Group/DM identity lives in `chatKinds` instead of the thread ID.
   encodeThreadId(platformData: LinqThreadId): string {
-    if (platformData.isGroup === undefined) {
-      return `linq:${platformData.chatId}`;
+    if (platformData.isGroup !== undefined) {
+      this.chatKinds.set(platformData.chatId, platformData.isGroup);
     }
 
-    return `linq:${platformData.chatId}:${platformData.isGroup ? "group" : "dm"}`;
+    return `linq:${platformData.chatId}`;
   }
 
   decodeThreadId(threadId: string): LinqThreadId {
@@ -74,15 +88,20 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new Error(`Invalid Linq thread ID: ${threadId}`);
     }
 
-    if (kind === "group") {
-      return { chatId, isGroup: true };
+    // Older adapter versions encoded group/dm into the thread ID. Keep decoding
+    // those so persisted thread IDs survive the format change.
+    if (kind === "group" || kind === "dm") {
+      const isGroup = kind === "group";
+      this.chatKinds.set(chatId, isGroup);
+
+      return { chatId, isGroup };
     }
 
-    if (kind === "dm") {
-      return { chatId, isGroup: false };
+    if (kind !== undefined) {
+      throw new Error(`Invalid Linq thread ID: ${threadId}`);
     }
 
-    return { chatId };
+    return { chatId, isGroup: this.chatKinds.get(chatId) };
   }
 
   // Messages
@@ -132,15 +151,24 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
     const text = this.converter.renderPostable(message).trim();
+    const mediaParts = await buildLinqMediaParts(this.apiClient, message);
 
-    if (!text) {
-      throw new Error("Linq message text cannot be empty.");
+    const parts: LinqOutboundPart[] = [];
+
+    // Text leads so the message reads as [text, media, ...]; Linq disallows
+    // consecutive text parts but is fine with a single text part before media.
+    if (text) {
+      parts.push({ type: "text", value: text });
+    }
+
+    parts.push(...mediaParts);
+
+    if (parts.length === 0) {
+      throw new Error("Linq message must include text or media.");
     }
 
     const response = await this.apiClient.chats.messages.send(chatId, {
-      message: {
-        parts: [{ type: "text", value: text }],
-      },
+      message: { parts },
     });
 
     return {
@@ -274,10 +302,22 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
-      const threadId = this.encodeThreadId({
-        chatId: event.data.chat.id,
-        isGroup: event.data.chat.is_group ?? undefined,
-      });
+      const chatId = event.data.chat.id;
+      const isGroup = event.data.chat.is_group ?? undefined;
+
+      // isDM() only trusts known chats, so resolve group/DM identity before
+      // dispatching when the webhook does not carry it.
+      if (isGroup === undefined && !this.chatKinds.has(chatId)) {
+        try {
+          const chat = await this.apiClient.chats.retrieve(chatId);
+
+          this.chatKinds.set(chatId, chat.is_group);
+        } catch (error) {
+          this.logger.warn(`Failed to resolve Linq chat kind for ${chatId}`, { error });
+        }
+      }
+
+      const threadId = this.encodeThreadId({ chatId, isGroup });
 
       const factory = async (): Promise<Message<unknown>> => {
         const msg = this.parseMessage(event.data);
@@ -286,13 +326,90 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       };
 
       this.chat.processMessage(this, threadId, factory, options);
+    } else if (this.chat && isReactionWebhookEvent(event)) {
+      this.processReactionWebhook(this.chat, event, options);
     }
 
     return new Response("OK", { status: 200 });
   }
 
+  private processReactionWebhook(
+    chat: ChatInstance,
+    event:
+      | LinqAPIV3.Webhooks.ReactionAddedWebhookEvent
+      | LinqAPIV3.Webhooks.ReactionRemovedWebhookEvent,
+    options?: WebhookOptions,
+  ): void {
+    const { chat_id: chatId, message_id: messageId } = event.data;
+
+    if (!chatId || !messageId) {
+      this.logger.debug(`Ignoring Linq ${event.event_type} webhook without chat/message ID`);
+
+      return;
+    }
+
+    const reaction = fromLinqReaction(event.data);
+
+    if (!reaction) {
+      this.logger.debug(
+        `Ignoring Linq ${event.event_type} webhook with unsupported reaction type ${event.data.reaction_type}`,
+      );
+
+      return;
+    }
+
+    const handle = event.data.from_handle;
+    const isMe = event.data.is_from_me || handle?.is_me === true;
+    const senderId = handle?.id || handle?.handle || event.data.from || "unknown";
+    const senderName = handle?.handle || event.data.from || senderId;
+
+    chat.processReaction(
+      {
+        adapter: this,
+        added: event.event_type === "reaction.added",
+        emoji: reaction.emoji,
+        rawEmoji: reaction.rawEmoji,
+        messageId,
+        threadId: this.encodeThreadId({ chatId }),
+        raw: event,
+        user: {
+          userId: senderId,
+          userName: senderName,
+          fullName: senderName,
+          isBot: isMe,
+          isMe,
+        },
+      },
+      options,
+    );
+  }
+
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
     return parseLinqMessage(raw, (platformData) => this.encodeThreadId(platformData));
+  }
+
+  // Rebuild fetchData after an attachment is serialized to the queue and back.
+  // Linq media lives on permanent cdn.linqapp.com URLs, so the stored URL is all
+  // we need to re-download.
+  rehydrateAttachment(attachment: Attachment): Attachment {
+    const url = attachment.fetchMetadata?.url ?? attachment.url;
+
+    if (!url) {
+      return attachment;
+    }
+
+    return {
+      ...attachment,
+      fetchData: async () => {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          throw new Error(`Failed to fetch Linq attachment ${url}: ${response.status}`);
+        }
+
+        return Buffer.from(await response.arrayBuffer());
+      },
+    };
   }
 
   // Random
@@ -305,7 +422,9 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   isDM(threadId: string): boolean {
-    return this.decodeThreadId(threadId).isGroup !== true;
+    // Only report a DM when we have seen the chat and know it is not a group.
+    // Webhooks always carry `is_group`, so this is warm before handlers run.
+    return this.decodeThreadId(threadId).isGroup === false;
   }
 }
 
