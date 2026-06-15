@@ -134,6 +134,31 @@ pnpm build
 
 A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters into one bot) lives in [`apps/api`](../../apps/api) in this repo.
 
+## Live smoke test
+
+`smoke-live.mjs` drives this adapter against the **real Linq API** so you can validate a sandbox in one command. Run `pnpm build` first (it imports `./dist`).
+
+Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli): `linq signup --phone <your cell>`, then grab the token from `~/.linq/config.json`.
+
+```bash
+# outbound: bootstrap a chat and send text + two images (one by URL, one pre-uploaded)
+LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
+  node smoke-live.mjs send
+
+# inbound: receive real webhooks (text + reactions), optionally echo-reply
+LINQ_API_KEY=<token> LINQ_SIGNING_SECRET=<webhook secret> LINQ_ECHO=1 \
+  node smoke-live.mjs serve
+# then tunnel it (cloudflared/ngrok) and register the URL as a Linq webhook subscription
+```
+
+| Env | Mode | Purpose |
+| --- | ---- | ------- |
+| `LINQ_API_KEY` | both | Linq API token |
+| `LINQ_FROM` / `LINQ_TEST_TO` | send | sender (sandbox) number / your phone — or set `LINQ_TEST_CHAT_ID` to reuse a chat |
+| `LINQ_SIGNING_SECRET` | serve | webhook signing secret (from the subscription) |
+| `LINQ_BASE_URL` | both | override API base URL (optional) |
+| `LINQ_ECHO=1` | serve | reply to inbound messages so you get a round-trip on the device |
+
 ## License
 
 [Apache-2.0](../../LICENSE)
