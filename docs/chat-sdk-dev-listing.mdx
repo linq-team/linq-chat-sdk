@@ -1,0 +1,153 @@
+---
+title: Linq
+package: "@linqapp/chat-sdk-adapter"
+description: iMessage and SMS adapter for Chat SDK, built and maintained by Linq. Send and receive texts, media, and tapback reactions over Apple Messages and SMS.
+category: vendor-official
+repository: https://github.com/linq-team/linq-chat-sdk
+---
+
+# Linq
+
+The Linq adapter connects Chat SDK to **iMessage and SMS** through the [Linq](https://linqapp.com) API. Write your bot once with the standard Chat SDK handlers and it converses over Apple Messages and SMS — DMs and group chats, media both directions, and native iMessage tapback reactions.
+
+## Install
+
+```bash
+npm install @linqapp/chat-sdk-adapter chat
+```
+
+## Quick start
+
+```ts
+import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
+import { Chat } from "chat";
+
+const chat = new Chat({
+  userName: "mybot",
+  adapters: {
+    linq: createLinqAdapter({
+      apiKey: process.env.LINQ_API_KEY!,
+      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+    }),
+  },
+});
+
+chat.onDirectMessage(async (thread, message) => {
+  await thread.subscribe();
+  await thread.post(`you said: ${message.text}`);
+});
+
+chat.onReaction(["thumbs_up"], async (event) => {
+  await event.thread.post("appreciate the tapback 🫡");
+});
+```
+
+Route Linq webhooks to the adapter from any fetch-style handler:
+
+```ts
+// e.g. a Next.js / Nitro / Hono POST route
+export default async (request: Request) => chat.webhooks.linq(request);
+```
+
+## Overview
+
+A Linq chat maps to a Chat SDK **thread**, a text to a **message**, and an iMessage tapback to a **reaction**. Threads are identified the same way whether they first arrive via webhook or API, so a conversation is never split. The standard Chat SDK APIs — `thread.post`, `thread.subscribe`, `onDirectMessage`, `onNewMessage`, `onReaction`, `thread.refresh` — all work unchanged.
+
+## Configuration
+
+| Option          | Required | Description                                                                                                              |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `apiKey`        | yes      | Linq API key, used for all outbound API calls.                                                                          |
+| `signingSecret` | yes      | Webhook signing secret. Inbound requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
+| `baseURL`       | no       | Override the Linq API base URL (e.g. a sandbox host).                                                                   |
+
+## Platform setup
+
+1. Create a Linq account and get an API key. For testing, the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli) provisions a sandbox number: `linq signup --phone <your cell>`.
+2. Configure a webhook signing secret (returned when you create a subscription).
+3. Create a webhook subscription pointing at your route and subscribe to at least `message.received`, `reaction.added`, and `reaction.removed`. Other event types are acknowledged with a `200` and ignored.
+
+## Webhook events
+
+| Event              | Role                                          |
+| ------------------ | --------------------------------------------- |
+| `message.received` | Inbound messages (text, media, group + DM).   |
+| `reaction.added`   | A tapback was added → dispatched to `onReaction`. |
+| `reaction.removed` | A tapback was removed.                         |
+
+```ts
+export default async (request: Request) => chat.webhooks.linq(request);
+```
+
+Requests are verified (HMAC-SHA256 with replay protection) before dispatch; an invalid or stale signature returns `401`.
+
+## Thread IDs
+
+Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs. DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
+
+## Message format
+
+Outbound markdown is rendered to plain text — Linq delivers message text as-is (iMessage has no markdown). Inbound text is parsed to the Chat SDK AST, with URLs surfaced as link previews.
+
+## Reactions
+
+Standard iMessage tapbacks map to normalized Chat SDK emoji in both directions:
+
+| Linq tapback | Chat SDK emoji |
+| ------------ | -------------- |
+| `like`       | `thumbs_up`    |
+| `dislike`    | `thumbs_down`  |
+| `love`       | `heart`        |
+| `laugh`      | `laugh`        |
+| `emphasize`  | `exclamation`  |
+| `question`   | `question`     |
+
+Custom emoji reactions pass through the default emoji resolver (e.g. `👍` → `thumbs_up`), falling back to the raw emoji for anything unmapped. Sticker reactions have no Chat SDK equivalent and are skipped.
+
+## Attachments
+
+- **Inbound** media (images, audio, files) arrive as Chat SDK attachments with downloadable data, and survive queue serialization (Linq CDN URLs are permanent).
+- **Outbound** `attachments` and `files` become Linq media parts: a public HTTPS URL under 10 MB is sent by reference; raw bytes, non-HTTPS URLs, and files up to 100 MB are pre-uploaded via `POST /v3/attachments`. Messages can be media-only.
+
+## Feature support
+
+| Feature                                            | Status                                    |
+| -------------------------------------------------- | ----------------------------------------- |
+| Inbound / outbound text                            | ✅                                        |
+| Group chats                                        | ✅ reply to existing groups               |
+| Inbound / outbound media (images, audio, files)    | ✅                                        |
+| Tapback reactions (in + out)                       | ✅                                        |
+| Edit message                                       | ✅ text, first part                       |
+| Fetch message / history / thread                   | ✅                                        |
+| Typing indicators                                  | ✅ DMs only                               |
+| Webhook signature verification + replay protection | ✅                                        |
+| Streaming                                          | ⚠️ buffered — one final message           |
+| Sticker reactions                                  | ❌ no Chat SDK equivalent                 |
+| Delete message                                     | ❌ Linq cannot unsend on the recipient    |
+| `openDM()` / creating chats                        | ❌ Linq chats start with an initial message |
+| Modals, cards, slash commands                      | ❌ no iMessage equivalent                 |
+
+## Examples
+
+- [Adapter source + README](https://github.com/linq-team/linq-chat-sdk/tree/main/packages/adapter-linq)
+- [Example app](https://github.com/linq-team/linq-chat-sdk/tree/main/apps/api) — a Nitro server running one AI bot across Linq, Telegram, and WhatsApp.
+
+---
+
+## Catalog metadata (for `chat/adapters`)
+
+```jsonc
+{
+  "name": "linq",
+  "package": "@linqapp/chat-sdk-adapter",
+  "tier": "vendor-official",
+  "peerDependencies": { "chat": "^4.28.1" },
+  "credentialMode": "apiKey + webhook signing secret (HMAC-SHA256)",
+  "environmentVariables": ["LINQ_API_KEY", "LINQ_WEBHOOK_SECRET"],
+  "constructorConfig": {
+    "apiKey": { "required": true, "env": "LINQ_API_KEY" },
+    "signingSecret": { "required": true, "env": "LINQ_WEBHOOK_SECRET" },
+    "baseURL": { "required": false }
+  }
+}
+```
