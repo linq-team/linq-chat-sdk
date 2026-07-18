@@ -261,6 +261,16 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       };
     }
 
+    // Cards degrade to plain text here. With reply actions disabled too, the
+    // card's buttons have NO dispatch path — surface that instead of letting
+    // the bot's onAction handlers silently never fire (the original Eve bug).
+    if (card && !this.cardActions && collectReplyActions(card).length > 0) {
+      this.logger.warn(
+        "Card buttons were flattened to text with no way to dispatch onAction. " +
+          "Enable cardReplyActions or cardLinks, or use LinkButton/CardLink URLs.",
+      );
+    }
+
     const text = this.converter.renderPostable(message).trim();
     const mediaParts = await buildLinqMediaParts(this.apiClient, message);
 
