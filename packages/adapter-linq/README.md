@@ -78,7 +78,7 @@ Other event types are acknowledged with a `200` and ignored.
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
 | `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
-| Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
+| Cards                                              | ✅ four composable layers: plain-text fallback, reply-mapped buttons (`onAction` works in-chat), interactive web cards via rich link previews, and native iMessage app-card bubbles |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
 
 ## Thread IDs
@@ -113,22 +113,57 @@ A message can be media-only (no text). Inbound attachments expose `fetchData()` 
 
 ## Cards
 
-iMessage/SMS has no rich-card UI, so Chat SDK [cards](https://chat-sdk.dev/docs/cards) are flattened to their closest native equivalent instead of being dropped:
+iMessage has no native buttons for arbitrary recipients, so the adapter layers up to four strategies. They compose — enable what you need:
 
-- Title, subtitle, text, fields, links, dividers, and tables render as clean plain text (markdown is stripped — iMessage would show literal `**`).
-- `<Image>` elements and the card's `imageUrl` are sent as real image media parts (public HTTPS URLs only; other URLs stay visible in the text).
-- Buttons and selects render their labels (e.g. `Options: Approve, Reject`) so the recipient sees what the card offers — but there are no tappable buttons on iMessage, so `onAction()` handlers never fire from this adapter. If you need a working action, include a `LinkButton`/`CardLink` URL or handle plain text replies.
-- An explicit `fallbackText` on `{ card, fallbackText }` replaces the generated text; card images are still attached.
+### 1. Plain-text fallback (always on)
+
+Title, subtitle, text, fields, links, dividers, and tables render as clean plain text (markdown is stripped — iMessage would show literal `**`); `<Image>` elements and the card's `imageUrl` become real image media parts. An explicit `fallbackText` on `{ card, fallbackText }` replaces the generated text.
+
+### 2. Reply-mapped buttons (`cardReplyActions`, on by default)
+
+Buttons render as numbered reply options — `Reply 1 to Approve or 2 to Reject` — and the next inbound reply in that chat matching a number, label, or action ID dispatches the button's `onAction` handler (with real sender attribution) instead of being processed as a message. This is the only in-chat button mechanism that exists on iMessage/SMS. The latest card with buttons per chat is live for 24h and is consumed by one match; non-matching replies pass through untouched.
+
+### 3. Interactive web cards (`cardLinks`)
+
+```ts
+createLinqAdapter({
+  apiKey,
+  signingSecret,
+  cardLinks: { baseUrl: "https://your-bot.example.com/cards" },
+});
+```
+
+Cards are hosted at signed, short-lived URLs (served by `handleWebhook` — point `baseUrl` at your existing public endpoint) and sent as rich link previews. Tapping opens the full card as a clean mobile page whose buttons and selects POST back and dispatch `onAction`. DM taps are attributed to the chat's counterpart; group taps are anonymous. Cards live in adapter memory: a restart invalidates in-flight card pages (replies via layer 2 keep working).
+
+### 4. Native app-card bubbles (`cardAppIdentity`, requires `cardLinks`)
+
+```ts
+createLinqAdapter({
+  apiKey,
+  signingSecret,
+  cardLinks: { baseUrl: "https://your-bot.example.com/cards" },
+  cardAppIdentity: { bundleId: "com.acme.bot.MessagesExtension", name: "Acme", teamId: "ACMETEAM12" },
+});
+```
+
+Cards go out as Linq `imessage_app` parts — real iMessage card bubbles with an image (title/subtitle overlaid), caption/subcaption, and trailing labels mapped from the card's title, subtitle, fields, and first image. The subcaption carries the reply hint, the tap URL opens the layer-3 web card, and the fallback text covers notifications. Caveats: iMessage-only (Linq rejects app cards over SMS), and `image_url` only renders in chats Linq considers trusted (healthy chat with inbound activity) — unhealthy chats get the text layout silently.
 
 ```tsx
 await thread.post(
-  <Card title="Order #1234">
-    <Image url="https://example.com/receipt.png" alt="Receipt" />
+  <Card title="Order #1234" subtitle="Ready for review" imageUrl="https://cdn.example.com/receipt.png">
     <CardText>Your order has been received!</CardText>
-    <CardLink url="https://example.com/orders/1234" label="Track order" />
+    <Fields>
+      <Field label="Total" value="$42" />
+    </Fields>
+    <Actions>
+      <Button id="approve" style="primary">Approve</Button>
+      <Button id="reject" style="danger">Reject</Button>
+    </Actions>
   </Card>,
 );
-// → one iMessage: text bubble + attached receipt image
+// text mode  → one bubble: "Order #1234 … Reply 1 to Approve or 2 to Reject"
+// link mode  → rich preview bubble → tap → interactive web card
+// app mode   → native card bubble; replying "1" fires onAction("approve")
 ```
 
 ## Reactions

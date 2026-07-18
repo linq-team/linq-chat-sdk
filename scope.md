@@ -24,7 +24,7 @@ The adapter can already handle the core receive/reply path:
 - Skip typing indicators for known group chats and ignore Linq's expected group-chat typing rejection.
 - Show typing indicators for direct-message chats.
 - Automatically subscribe and respond to inbound Linq group chats received through webhooks.
-- Render Chat SDK cards as a native equivalent: plain text (markdown stripped, links/fields/tables/action labels preserved) plus real image media parts.
+- Render Chat SDK cards as a native equivalent: plain text (markdown stripped, links/fields/tables/action labels preserved) plus real image media parts — with optional reply-mapped `onAction` dispatch, interactive web-card pages, and native app-card bubbles.
 
 ## Work still left
 
@@ -153,11 +153,11 @@ Do not implement channel-level APIs or generic thread listing unless the app has
 
 ### Interactive chat UI surfaces
 
-Linq does not provide equivalents for Chat SDK modals, app home, slash commands, or tappable buttons/selects.
+Linq does not provide equivalents for Chat SDK modals, app home, or slash commands.
 
-Do not implement modal/action/slash-command/app-home APIs for this adapter.
+Do not implement modal/slash-command/app-home APIs for this adapter.
 
-Cards are the exception: they are **not** dropped. `postMessage()` flattens a card to plain text plus image media parts (see "Current adapter status"), so bots that post cards still show up in chat. The non-interactive parts render faithfully; buttons and selects render their labels only — `onAction()` never fires from Linq, so there is no action dispatch to implement.
+Cards and their actions **are** implemented, as four composable layers (see the README's Cards section): plain-text flattening (always), reply-mapped buttons dispatching `onAction` from inbound replies (`cardReplyActions`, default on), interactive web cards served at signed URLs and sent as rich link previews (`cardLinks`), and native iMessage app-card bubbles (`cardAppIdentity`, iMessage-only, image gated by Linq chat health). What remains out of scope: tappable buttons inside the bubble itself for recipients without an installed Messages extension — Apple does not offer that surface — and `updateAppCard`-based live card editing (future work).
 
 
 

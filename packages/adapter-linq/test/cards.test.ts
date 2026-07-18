@@ -213,7 +213,7 @@ describe("LinqAdapter.postMessage with cards", () => {
     expect(send).toHaveBeenCalledWith("chat-123", {
       message: {
         parts: [
-          { type: "text", value: "Options: Yes, No" },
+          { type: "text", value: "Reply 1 to Yes or 2 to No" },
           { type: "media", url: "https://example.com/photo.png" },
         ],
       },

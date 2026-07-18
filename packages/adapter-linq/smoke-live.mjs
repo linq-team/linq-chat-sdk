@@ -1,9 +1,16 @@
 // Live smoke test against the REAL Linq API, through the real adapter.
 // Whatever lands on your phone is exactly what ships.
 //
-//   send  — bootstrap a chat (or reuse one) and send text + two images
-//   cards — send Chat SDK cards (incl. the image+buttons card that used to vanish)
-//   serve — receive real webhooks (text/reactions) and optionally echo-reply
+//   send       — bootstrap a chat (or reuse one) and send text + two images
+//   cards      — send Chat SDK cards (incl. the image+buttons card that used to vanish)
+//   cards-link — send an INTERACTIVE card as a rich link preview; tapping its
+//                buttons dispatches onAction and replies in the thread.
+//                needs a public tunnel: LINQ_CARD_BASE_URL=https://<tunnel>/cards
+//   cards-reply— send a card with numbered reply options; replying "1"/"Approve"
+//                dispatches onAction. registers a TEMPORARY webhook subscription
+//                (scoped to LINQ_FROM, deleted on ctrl-c).
+//                needs: LINQ_PUBLIC_URL=https://<tunnel>  LINQ_FROM=+1...
+//   serve      — receive real webhooks (text/reactions) and optionally echo-reply
 //
 // Run from packages/adapter-linq so deps + ./dist resolve.
 //
@@ -40,9 +47,11 @@ const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
 );
+// Full-size: iMessage only renders the large card-style link preview when the
+// og:image is big; a 120px thumb gets the compact row treatment.
 const IMAGE_URL =
   process.env.LINQ_TEST_IMAGE_URL ||
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/120px-Cat03.jpg";
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg";
 
 function need(name) {
   const v = process.env[name];
@@ -192,6 +201,319 @@ async function cards() {
   process.exit(ok ? 0 : 1);
 }
 
+// Full interactive-card loop, live: card goes out as a rich link preview, the
+// local server (behind a tunnel) serves the card page, and button taps
+// dispatch processAction — which replies back into the iMessage thread.
+async function cardsLink() {
+  const cardBaseUrl = need("LINQ_CARD_BASE_URL");
+  const port = Number(process.env.PORT || 8787);
+  const a = createLinqAdapter({
+    apiKey: API_KEY,
+    baseURL: BASE_URL,
+    signingSecret: "unused-for-cards-link",
+    cardLinks: { baseUrl: cardBaseUrl },
+  });
+
+  // Minimal ChatInstance stand-in: processAction is exactly what chat-core
+  // exposes; here it replies in-thread so the tap is visible on the device.
+  a.chat = {
+    getLogger: () => console,
+    processAction: async (event) => {
+      console.log(
+        `\n🔘 action dispatched  actionId=${event.actionId}  value=${JSON.stringify(event.value)}  by=${event.user?.userName}  thread=${event.threadId}`,
+      );
+      await a
+        .postMessage(
+          event.threadId,
+          `✅ onAction fired: "${event.actionId}"${event.value ? ` (${event.value})` : ""} — tapped by ${event.user?.userName}`,
+        )
+        .then((r) => console.log(`   ↪︎ replied in thread, msg ${r.id}`))
+        .catch((e) => console.log(`   ↪︎ reply failed: ${e?.message ?? e}`));
+    },
+  };
+
+  createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks);
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (typeof v === "string") headers.set(k, v);
+    }
+    const request = new Request(`http://localhost:${port}${req.url}`, {
+      method: req.method,
+      headers,
+      body: raw.length > 0 ? raw : undefined,
+    });
+    const response = await a.handleWebhook(request);
+    console.log(`   ${req.method} ${req.url} → ${response.status}`);
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    res.end(Buffer.from(await response.arrayBuffer()));
+  }).listen(port, async () => {
+    console.log(`card server on http://localhost:${port} (public: ${cardBaseUrl})`);
+
+    const chatId = await bootstrapChat("interactive card test — next message is a tappable card");
+    const threadId = `linq:${chatId}`;
+
+    const ok = await step("interactive card as rich link preview", async () => {
+      const r = await a.postMessage(
+        threadId,
+        Card({
+          title: "Order #1234",
+          subtitle: "Tap to review",
+          imageUrl: IMAGE_URL,
+          children: [
+            CardText("Your order is ready for review. **Approve** or **reject** below."),
+            Fields([
+              Field({ label: "Name", value: "Eve" }),
+              Field({ label: "Total", value: "$42" }),
+            ]),
+            Divider(),
+            Actions([
+              Button({ id: "approve", label: "Approve", style: "primary", value: "order-1234" }),
+              Button({ id: "reject", label: "Reject", style: "danger", value: "order-1234" }),
+              LinkButton({ url: "https://linqapp.com", label: "Get help" }),
+            ]),
+          ],
+        }),
+      );
+      return `msg ${r.id}`;
+    });
+
+    if (!ok) {
+      process.exit(1);
+    }
+
+    console.log(
+      "\ncard sent as a link preview. tap it on the device, hit Approve/Reject, and watch for the in-thread reply. ctrl-c when done.",
+    );
+  });
+}
+
+// The full composed experience: ONE native app-card bubble (image + overlaid
+// title, captions, price columns) whose subcaption says how to reply, whose
+// tap URL opens the interactive web card, and whose replies dispatch onAction.
+async function cardsApp() {
+  const publicUrl = need("LINQ_PUBLIC_URL").replace(/\/+$/, "");
+  const fromNumber = need("LINQ_FROM");
+  const port = Number(process.env.PORT || 8787);
+  const sdk = new LinqAPIV3({ apiKey: API_KEY, baseURL: BASE_URL });
+
+  console.log("registering temporary webhook subscription …");
+  const subscription = await sdk.webhookSubscriptions.create({
+    subscribed_events: ["message.received"],
+    target_url: `${publicUrl}/webhook`,
+    phone_numbers: [fromNumber],
+  });
+  console.log(`subscription ${subscription.id} → ${subscription.target_url}`);
+
+  const cleanup = async () => {
+    console.log(`\ndeleting webhook subscription ${subscription.id} …`);
+    await sdk.webhookSubscriptions.delete(subscription.id).catch((e) => {
+      console.log(`  cleanup failed (${e?.status}): delete it manually with the API`);
+    });
+    process.exit(0);
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+
+  const a = createLinqAdapter({
+    apiKey: API_KEY,
+    baseURL: BASE_URL,
+    signingSecret: subscription.signing_secret,
+    cardLinks: { baseUrl: `${publicUrl}/cards` },
+    cardAppIdentity: {
+      bundleId: "com.milolabs.milo.MessagesExtension",
+      name: "Milo",
+      teamId: "MILOLABS42",
+    },
+  });
+
+  a.chat = {
+    getLogger: () => console,
+    processAction: async (event) => {
+      console.log(
+        `\n🔘 onAction dispatched  actionId=${event.actionId}  value=${JSON.stringify(event.value)}  by=${event.user?.userName}`,
+      );
+      await a
+        .postMessage(
+          event.threadId,
+          `✅ onAction fired: "${event.actionId}"${event.value ? ` (${event.value})` : ""}`,
+        )
+        .then((r) => console.log(`   ↪︎ replied in thread, msg ${r.id}`))
+        .catch((e) => console.log(`   ↪︎ reply failed: ${e?.message ?? e}`));
+    },
+    processMessage: async (_adapter, threadId, factory) => {
+      const msg = await factory();
+      console.log(
+        `\n📩 plain message (no action match)  thread=${threadId}  text=${JSON.stringify(msg.text)}`,
+      );
+    },
+  };
+
+  createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks);
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (typeof v === "string") headers.set(k, v);
+    }
+    const request = new Request(`http://localhost:${port}${req.url}`, {
+      method: req.method,
+      headers,
+      body: raw.length > 0 ? raw : undefined,
+    });
+    const response = await a.handleWebhook(request);
+    console.log(`   ${req.method} ${req.url} → ${response.status}`);
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    res.end(Buffer.from(await response.arrayBuffer()));
+  }).listen(port, async () => {
+    console.log(`server on http://localhost:${port} (public: ${publicUrl})`);
+
+    const chatId = await bootstrapChat("full card experience test — next up: the real deal");
+    const threadId = `linq:${chatId}`;
+
+    const ok = await step("native app card + tap page + reply actions", async () => {
+      const r = await a.postMessage(
+        threadId,
+        Card({
+          title: "Order #1234",
+          subtitle: "Ready for review",
+          imageUrl: process.env.LINQ_CARD_IMAGE_URL || IMAGE_URL,
+          children: [
+            CardText("Eve's order is ready. Approve to start fulfillment."),
+            Fields([
+              Field({ label: "Total", value: "$42" }),
+              Field({ label: "Items", value: "2 items" }),
+            ]),
+            Actions([
+              Button({ id: "approve", label: "Approve", style: "primary", value: "order-1234" }),
+              Button({ id: "reject", label: "Reject", style: "danger", value: "order-1234" }),
+            ]),
+          ],
+        }),
+      );
+      return `msg ${r.id}`;
+    });
+
+    if (!ok) {
+      await cleanup();
+    }
+
+    console.log(
+      '\none bubble, three layers: native card look, tap → web card, reply "1"/"2" → onAction. ctrl-c to clean up.',
+    );
+  });
+}
+
+// Reply-mapped card actions, live: the card offers "Reply 1 to Approve or 2 to
+// Reject"; a temporary webhook subscription delivers your reply, the adapter
+// matches it, and onAction fires — no web page, works over SMS too.
+async function cardsReply() {
+  const publicUrl = need("LINQ_PUBLIC_URL").replace(/\/+$/, "");
+  const fromNumber = need("LINQ_FROM");
+  const port = Number(process.env.PORT || 8787);
+  const sdk = new LinqAPIV3({ apiKey: API_KEY, baseURL: BASE_URL });
+
+  console.log("registering temporary webhook subscription …");
+  const subscription = await sdk.webhookSubscriptions.create({
+    subscribed_events: ["message.received"],
+    target_url: `${publicUrl}/webhook`,
+    phone_numbers: [fromNumber],
+  });
+  console.log(`subscription ${subscription.id} → ${subscription.target_url}`);
+
+  const cleanup = async () => {
+    console.log(`\ndeleting webhook subscription ${subscription.id} …`);
+    await sdk.webhookSubscriptions.delete(subscription.id).catch((e) => {
+      console.log(`  cleanup failed (${e?.status}): delete it manually with the API`);
+    });
+    process.exit(0);
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+
+  const a = createLinqAdapter({
+    apiKey: API_KEY,
+    baseURL: BASE_URL,
+    signingSecret: subscription.signing_secret,
+  });
+
+  a.chat = {
+    getLogger: () => console,
+    processAction: async (event) => {
+      console.log(
+        `\n🔘 onAction dispatched  actionId=${event.actionId}  value=${JSON.stringify(event.value)}  by=${event.user?.userName}`,
+      );
+      await a
+        .postMessage(
+          event.threadId,
+          `✅ onAction fired via reply: "${event.actionId}"${event.value ? ` (${event.value})` : ""}`,
+        )
+        .then((r) => console.log(`   ↪︎ replied in thread, msg ${r.id}`))
+        .catch((e) => console.log(`   ↪︎ reply failed: ${e?.message ?? e}`));
+    },
+    processMessage: async (_adapter, threadId, factory) => {
+      const msg = await factory();
+      console.log(
+        `\n📩 plain message (no action match)  thread=${threadId}  text=${JSON.stringify(msg.text)}`,
+      );
+    },
+  };
+
+  createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks);
+    const headers = new Headers();
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (typeof v === "string") headers.set(k, v);
+    }
+    const request = new Request(`http://localhost:${port}${req.url}`, {
+      method: req.method,
+      headers,
+      body: raw.length > 0 ? raw : undefined,
+    });
+    const response = await a.handleWebhook(request);
+    if (response.status !== 200) {
+      console.log(`⚠️  ${req.method} ${req.url} → ${response.status}`);
+    }
+    res.writeHead(response.status);
+    res.end(await response.text().catch(() => ""));
+  }).listen(port, async () => {
+    console.log(`webhook receiver on http://localhost:${port} (public: ${publicUrl}/webhook)`);
+
+    const chatId = await bootstrapChat("reply-action card test — answer the next card by replying");
+    const threadId = `linq:${chatId}`;
+
+    const ok = await step("card with numbered reply options", async () => {
+      const r = await a.postMessage(
+        threadId,
+        Card({
+          title: "Order #1234",
+          children: [
+            CardText("Ready for review."),
+            Actions([
+              Button({ id: "approve", label: "Approve", style: "primary", value: "order-1234" }),
+              Button({ id: "reject", label: "Reject", style: "danger", value: "order-1234" }),
+            ]),
+          ],
+        }),
+      );
+      return `msg ${r.id}`;
+    });
+
+    if (!ok) {
+      await cleanup();
+    }
+
+    console.log(
+      '\nnow reply on your phone: "1", "2", "approve", or "reject" → watch for the onAction reply. any other text logs as a plain message. ctrl-c to clean up.',
+    );
+  });
+}
+
 async function serve() {
   const signingSecret = need("LINQ_SIGNING_SECRET");
   const a = adapter(signingSecret);
@@ -260,8 +582,11 @@ async function serve() {
 const mode = process.argv[2];
 if (mode === "send") await send();
 else if (mode === "cards") await cards();
+else if (mode === "cards-link") await cardsLink();
+else if (mode === "cards-reply") await cardsReply();
+else if (mode === "cards-app") await cardsApp();
 else if (mode === "serve") await serve();
 else {
-  console.error("usage: node smoke-live.mjs <send|cards|serve>");
+  console.error("usage: node smoke-live.mjs <send|cards|cards-link|cards-reply|serve>");
   process.exit(2);
 }

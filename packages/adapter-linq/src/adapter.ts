@@ -4,6 +4,7 @@ import type {
   Adapter,
   AdapterPostableMessage,
   Attachment,
+  Author,
   ChatInstance,
   EmojiValue,
   FetchOptions,
@@ -16,7 +17,10 @@ import type {
   WebhookOptions,
 } from "chat";
 
-import { collectCardImageUrls, extractCardElement } from "./cards.js";
+import { buildAppCardLayout, type LinqAppCardIdentity } from "./app-card.js";
+import { CardActionRegistry, collectReplyActions, renderReplyHint } from "./card-actions.js";
+import { LinqCardLinkServer, type LinqCardLinkConfig } from "./card-link.js";
+import { collectCardImageUrls, extractCardElement, renderLinqCardText } from "./cards.js";
 import { LinqFormatConverter } from "./format-converter.js";
 import { isRecord } from "./guards.js";
 import {
@@ -32,7 +36,8 @@ import { verifyLinqWebhookRequest } from "./verification.js";
 type LinqOutboundPart =
   | { type: "text"; value: string }
   | { type: "media"; url: string }
-  | { type: "media"; attachment_id: string };
+  | { type: "media"; attachment_id: string }
+  | { type: "link"; value: string };
 
 type LinqThreadId = {
   chatId: string;
@@ -43,6 +48,26 @@ export interface LinqAdapterConfig {
   apiKey: string;
   baseURL?: string;
   signingSecret: string;
+  /**
+   * Serve cards as interactive web pages sent as rich link previews. Without
+   * this, cards are flattened to plain text and their buttons cannot dispatch
+   * `onAction` handlers (iMessage has no native buttons).
+   */
+  cardLinks?: LinqCardLinkConfig;
+  /**
+   * Offer card buttons as numbered reply options ("Reply 1 to Approve or 2 to
+   * Reject") and dispatch `onAction` when the next inbound reply matches an
+   * option's number or label. On by default — it is the only way buttons work
+   * in-chat over iMessage/SMS. Set false to disable.
+   */
+  cardReplyActions?: boolean;
+  /**
+   * Send cards as native iMessage app-card bubbles (image with overlaid title,
+   * captions, trailing labels) under this Messages-app identity. iMessage-only;
+   * composes with cardLinks (tap-through URL) and cardReplyActions (in-chat
+   * button dispatch).
+   */
+  cardAppIdentity?: LinqAppCardIdentity;
 }
 
 class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
@@ -50,11 +75,14 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly userName: string = "linq";
   readonly persistMessageHistory = true;
   private readonly apiClient: LinqAPIV3;
-  private readonly converter = new LinqFormatConverter();
+  private readonly converter: LinqFormatConverter;
   private readonly signingSecret: string;
 
   private chat: ChatInstance | null = null;
   private logger: Logger;
+  private readonly cardLinks: LinqCardLinkServer | null;
+  private readonly cardActions: CardActionRegistry | null;
+  private readonly cardAppIdentity: LinqAppCardIdentity | null;
   // chatId -> isGroup, learned from webhooks, fetchThread, and legacy thread IDs.
   private readonly chatKinds = new Map<string, boolean>();
 
@@ -62,6 +90,25 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     this.apiClient = new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL });
     this.signingSecret = config.signingSecret;
     this.logger = new ConsoleLogger();
+    this.cardActions = config.cardReplyActions !== false ? new CardActionRegistry() : null;
+    this.cardAppIdentity = config.cardAppIdentity ?? null;
+
+    // Linq requires a tap URL on app cards (despite the SDK marking it
+    // optional), and the card-link page is the only tap target that works for
+    // recipients without the Messages app installed.
+    if (this.cardAppIdentity && !config.cardLinks) {
+      throw new Error("cardAppIdentity requires cardLinks to be configured (app-card tap URL).");
+    }
+    // Numbered reply hints only make sense when replies are intercepted.
+    this.converter = new LinqFormatConverter(this.cardActions !== null);
+    this.cardLinks = config.cardLinks
+      ? new LinqCardLinkServer(config.cardLinks, config.signingSecret, {
+          getChat: () => this.chat,
+          getAdapter: () => this,
+          resolveActor: (chatId) => this.resolveCardActor(chatId),
+          getLogger: () => this.logger,
+        })
+      : null;
   }
 
   async initialize(chat: ChatInstance): Promise<void> {
@@ -151,6 +198,69 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId } = this.decodeThreadId(threadId);
+    const card = extractCardElement(message);
+
+    // Native app card: the card renders as a real iMessage card bubble. The
+    // tap URL (when card links are on) and reply-mapped buttons carry the
+    // interactivity; the fallback text covers notification previews.
+    if (card && this.cardAppIdentity) {
+      const replyActions = this.cardActions ? collectReplyActions(card) : [];
+      const layout = buildAppCardLayout(card, { replyHint: renderReplyHint(replyActions) });
+      const link = this.cardLinks?.createCard(card, { chatId, threadId });
+
+      const response = await this.apiClient.chats.messages.send(chatId, {
+        message: {
+          parts: [
+            {
+              type: "imessage_app",
+              app: {
+                bundle_id: this.cardAppIdentity.bundleId,
+                name: this.cardAppIdentity.name,
+                team_id: this.cardAppIdentity.teamId,
+                app_store_id: this.cardAppIdentity.appStoreId,
+              },
+              layout,
+              url: link?.url,
+              fallback_text: renderLinqCardText(card, {
+                numberedButtons: this.cardActions !== null,
+              }),
+            },
+          ],
+        },
+      });
+
+      if (link) {
+        this.cardLinks?.attachMessageId(link.cardId, response.message.id);
+      }
+
+      this.registerCardReplies(card, chatId, threadId, response.message.id);
+
+      return {
+        id: response.message.id,
+        threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
+        raw: response,
+      };
+    }
+
+    // With card links enabled, a card goes out as a rich link preview pointing
+    // at its hosted interactive page. Linq requires a link part to be the only
+    // part in the message.
+    if (card && this.cardLinks) {
+      const created = this.cardLinks.createCard(card, { chatId, threadId });
+      const response = await this.apiClient.chats.messages.send(chatId, {
+        message: { parts: [{ type: "link", value: created.url }] },
+      });
+
+      this.cardLinks.attachMessageId(created.cardId, response.message.id);
+      this.registerCardReplies(card, chatId, threadId, response.message.id);
+
+      return {
+        id: response.message.id,
+        threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
+        raw: response,
+      };
+    }
+
     const text = this.converter.renderPostable(message).trim();
     const mediaParts = await buildLinqMediaParts(this.apiClient, message);
 
@@ -164,8 +274,6 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     // Card images become real media parts; the rest of the card is already
     // flattened into the fallback text above.
-    const card = extractCardElement(message);
-
     if (card) {
       for (const url of collectCardImageUrls(card)) {
         parts.push({ type: "media", url });
@@ -182,11 +290,32 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       message: { parts },
     });
 
+    if (card) {
+      this.registerCardReplies(card, chatId, threadId, response.message.id);
+    }
+
     return {
       id: response.message.id,
       threadId: this.encodeThreadId({ chatId: response.chat_id || chatId }),
       raw: response,
     };
+  }
+
+  private registerCardReplies(
+    card: NonNullable<ReturnType<typeof extractCardElement>>,
+    chatId: string,
+    threadId: string,
+    messageId: string,
+  ): void {
+    if (!this.cardActions) {
+      return;
+    }
+
+    this.cardActions.register(chatId, {
+      threadId,
+      messageId,
+      actions: collectReplyActions(card),
+    });
   }
 
   async editMessage(
@@ -296,7 +425,18 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // handle webhook
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    type LinqWebhookEvent = LinqAPIV3.EventsWebhookEvent;
+    type LinqWebhookEvent = LinqAPIV3.UnwrapWebhookEvent;
+
+    // Card pages and their action callbacks share this handler so one public
+    // endpoint serves both. Card URLs are HMAC-signed rather than
+    // webhook-signed; requests outside the card path fall through untouched.
+    if (this.cardLinks) {
+      const cardResponse = await this.cardLinks.handleRequest(request, options);
+
+      if (cardResponse) {
+        return cardResponse;
+      }
+    }
 
     const verification = await verifyLinqWebhookRequest(request, this.signingSecret);
 
@@ -329,6 +469,34 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       }
 
       const threadId = this.encodeThreadId({ chatId, isGroup });
+
+      // A reply matching the chat's pending card buttons ("1", "Approve") is a
+      // button press, not a message: dispatch onAction with the real author.
+      if (this.cardActions) {
+        const msg = this.parseMessage(event.data);
+        const match = msg.text ? this.cardActions.match(chatId, msg.text) : null;
+
+        if (match) {
+          await this.chat.processAction(
+            {
+              actionId: match.actionId,
+              adapter: this,
+              messageId: match.messageId ?? msg.id,
+              raw: event,
+              threadId,
+              user: msg.author,
+              value: match.value,
+            },
+            options,
+          );
+
+          return new Response("OK", { status: 200 });
+        }
+
+        this.chat.processMessage(this, threadId, () => Promise.resolve(msg), options);
+
+        return new Response("OK", { status: 200 });
+      }
 
       const factory = async (): Promise<Message<unknown>> => {
         const msg = this.parseMessage(event.data);
@@ -397,6 +565,41 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   parseMessage(raw: LinqRawMessage): Message<LinqRawMessage> {
     return parseLinqMessage(raw, (platformData) => this.encodeThreadId(platformData));
+  }
+
+  // Card link taps carry no identity. In a DM the only person who can open the
+  // link is the other participant, so attribute the action to them; group taps
+  // stay anonymous.
+  private async resolveCardActor(chatId: string): Promise<Author> {
+    try {
+      const chat = await this.apiClient.chats.retrieve(chatId);
+
+      if (!chat.is_group) {
+        const other = chat.handles.find(
+          (handle) => handle.is_me !== true && handle.status !== "left",
+        );
+
+        if (other) {
+          return {
+            userId: other.id || other.handle,
+            userName: other.handle,
+            fullName: other.handle,
+            isBot: false,
+            isMe: false,
+          };
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to resolve card actor for Linq chat ${chatId}`, { error });
+    }
+
+    return {
+      userId: "linq-card-link",
+      userName: "linq-card-link",
+      fullName: "Card link user",
+      isBot: false,
+      isMe: false,
+    };
   }
 
   // Rebuild fetchData after an attachment is serialized to the queue and back.

@@ -58,10 +58,23 @@ function collectChildImageUrls(children: CardChild[], urls: string[]): void {
   }
 }
 
+// Rendering context: numbered mode gives every button a stable ordinal across
+// the whole card so "Reply 1 to …" hints line up with the reply registry.
+interface RenderContext {
+  numbered: boolean;
+  nextOrdinal: number;
+}
+
 // Render a card as plain text for Linq. Unlike the Chat SDK's default fallback
 // this strips markdown (iMessage renders `**` literally), keeps links, tables,
 // and action labels, and skips images that are sent as real media parts.
-export function renderLinqCardText(card: CardElement): string {
+// With `numberedButtons`, buttons render as reply instructions
+// ("Reply 1 to Approve or 2 to Reject") instead of a plain options list.
+export function renderLinqCardText(
+  card: CardElement,
+  options?: { numberedButtons?: boolean },
+): string {
+  const context: RenderContext = { numbered: options?.numberedButtons === true, nextOrdinal: 1 };
   const blocks: string[] = [];
 
   if (card.title) {
@@ -73,7 +86,7 @@ export function renderLinqCardText(card: CardElement): string {
   }
 
   for (const child of card.children) {
-    const text = renderCardChild(child);
+    const text = renderCardChild(child, context);
 
     if (text) {
       blocks.push(text);
@@ -83,7 +96,7 @@ export function renderLinqCardText(card: CardElement): string {
   return blocks.join("\n");
 }
 
-function renderCardChild(child: CardChild): string | null {
+function renderCardChild(child: CardChild, context: RenderContext): string | null {
   switch (child.type) {
     case "text":
       return markdownToPlainText(child.content).trim() || null;
@@ -100,26 +113,28 @@ function renderCardChild(child: CardChild): string | null {
       return tableElementToAscii(child.headers, child.rows);
     case "section": {
       const lines = child.children
-        .map((sectionChild) => renderCardChild(sectionChild))
+        .map((sectionChild) => renderCardChild(sectionChild, context))
         .filter((line): line is string => Boolean(line));
 
       return lines.length > 0 ? lines.join("\n") : null;
     }
     case "actions":
-      return renderActions(child);
+      return renderActions(child, context);
     default:
       return null;
   }
 }
 
-function renderActions(actions: ActionsElement): string | null {
+function renderActions(actions: ActionsElement, context: RenderContext): string | null {
   const lines: string[] = [];
   const buttonLabels: string[] = [];
 
   for (const element of actions.children) {
     switch (element.type) {
       case "button":
-        buttonLabels.push(element.label);
+        buttonLabels.push(
+          context.numbered ? `${context.nextOrdinal++} to ${element.label}` : element.label,
+        );
         break;
       case "link-button": {
         const line = renderLabeledUrl(element.label, element.url);
@@ -142,13 +157,24 @@ function renderActions(actions: ActionsElement): string | null {
     }
   }
 
-  // Buttons cannot trigger onAction() over iMessage/SMS; surface the choices as
-  // text so the card still communicates what it offers.
+  // Buttons cannot be tapped over iMessage/SMS. In numbered mode they become
+  // reply instructions wired to the reply-action registry; otherwise the labels
+  // are surfaced so the card still communicates what it offers.
   if (buttonLabels.length > 0) {
-    lines.unshift(`Options: ${buttonLabels.join(", ")}`);
+    lines.unshift(
+      context.numbered
+        ? `Reply ${formatList(buttonLabels)}`
+        : `Options: ${buttonLabels.join(", ")}`,
+    );
   }
 
   return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function formatList(items: string[]): string {
+  return items.length > 1
+    ? `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`
+    : (items[0] ?? "");
 }
 
 function renderLabeledUrl(label: string | undefined, url: string): string {

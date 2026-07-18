@@ -4,6 +4,10 @@ import type { CardElement, FormattedContent } from "chat";
 import { renderLinqCardText } from "./cards.js";
 
 export class LinqFormatConverter extends BaseFormatConverter {
+  constructor(private readonly numberedButtons: boolean = false) {
+    super();
+  }
+
   toAst(platformText: string): FormattedContent {
     return parseMarkdown(platformText);
   }
@@ -15,6 +19,6 @@ export class LinqFormatConverter extends BaseFormatConverter {
   // Linq renders text verbatim, so the default `**bold**` markdown fallback
   // would show literal asterisks. Use the Linq-specific plain-text rendering.
   protected override cardToFallbackText(card: CardElement): string {
-    return renderLinqCardText(card);
+    return renderLinqCardText(card, { numberedButtons: this.numberedButtons });
   }
 }
