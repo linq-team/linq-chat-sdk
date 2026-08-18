@@ -28,6 +28,25 @@ version that ships is the one in `packages/adapter-linq/package.json`.
 Nothing publishes until step 3, so the Version Packages PR is the release gate:
 review the version and the changelog there.
 
+### Why the release PR needs its own identity
+
+GitHub requires manual approval before running workflows on a pull request that
+`GITHUB_TOKEN` created, and that now applies to same-repo branches too. A release
+PR opened by `github-actions[bot]` therefore parks its checks in
+`action_required` and waits for a click on every release.
+
+The Version workflow avoids that by opening the PR as a real identity. Configure
+one of these; without either it falls back to `GITHUB_TOKEN` and the approval
+gate comes back:
+
+- **GitHub App** (preferred — the token is short-lived and nothing long-lived is
+  stored). Create an App with `contents: write` and `pull requests: write`,
+  install it on this repo, then set the `CHANGESETS_APP_ID` repository *variable*
+  and the `CHANGESETS_APP_PRIVATE_KEY` secret.
+- **Fine-grained PAT** — faster to set up, but long-lived. Scope it to this
+  repository with `Contents: read and write` and `Pull requests: read and
+  write`, and store it as the `CHANGESETS_TOKEN` secret.
+
 ### Why changesets does not publish
 
 `changesets/action` can publish, but it spawns the publish command as a child

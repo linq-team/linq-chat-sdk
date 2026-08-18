@@ -40,10 +40,26 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The release PR must be opened by a real identity, not github-actions[bot].
+      # GitHub requires manual approval before running workflows on a PR that
+      # GITHUB_TOKEN created — same-repo branches included — so a bot-authored
+      # release PR parks its checks in `action_required` and waits for a click
+      # on every single release.
+      #
+      # Prefers a GitHub App (short-lived token, nothing long-lived stored),
+      # falls back to a fine-grained PAT, and finally to GITHUB_TOKEN. That last
+      # case still works, it just brings the approval gate back.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        if: ${{ vars.CHANGESETS_APP_ID != '' }}
+        with:
+          app-id: ${{ vars.CHANGESETS_APP_ID }}
+          private-key: ${{ secrets.CHANGESETS_APP_PRIVATE_KEY }}
+
       - uses: changesets/action@v1
         with:
           version: pnpm changeset version
           title: "chore: version packages"
           commit: "chore: version packages"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
