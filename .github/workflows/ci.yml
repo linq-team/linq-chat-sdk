@@ -11,6 +11,12 @@ concurrency:
 
 jobs:
   verify:
+    # Skip the changesets release PR. It only bumps the version and rewrites
+    # CHANGELOG.md — the code is identical to main, which already passed here,
+    # and publish.yml re-runs every check before it publishes. Running CI on it
+    # adds nothing except a manual approval gate, because the PR is authored by
+    # github-actions[bot] and its runs land in `action_required`.
+    if: github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
