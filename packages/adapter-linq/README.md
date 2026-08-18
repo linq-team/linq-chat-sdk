@@ -56,7 +56,7 @@ Other event types are acknowledged with a `200` and ignored.
 | Option            | Required | Description                                                                                                              |
 | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                            |
-| `signingSecret`   | direct   | Webhook signing secret. Requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
+| `signingSecret`   | direct   | Webhook signing secret. Deliveries are verified with [Standard Webhooks](https://www.standardwebhooks.com), including replay-window checks. |
 | `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.             |
 | `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.               |
 | `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                           |
