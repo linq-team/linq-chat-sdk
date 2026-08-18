@@ -656,6 +656,25 @@ describe("LinqAdapter.startTyping", () => {
   });
 });
 
+describe("LinqAdapter.markRead", () => {
+  it("marks the thread chat as read", async () => {
+    const adapter = createTestAdapter();
+    const markAsRead = vi.fn().mockResolvedValue(undefined);
+    (
+      adapter as unknown as { apiClient: { chats: { markAsRead: typeof markAsRead } } }
+    ).apiClient = {
+      chats: { markAsRead },
+    };
+    vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
+      chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
+    });
+
+    await adapter.markRead("linq:chat-123", "message-123");
+
+    expect(markAsRead).toHaveBeenCalledWith("3caaf1a0-ef9f-46e0-8c22-31e82c8514dc");
+  });
+});
+
 describe("LinqAdapter.stream", () => {
   it("buffers stream chunks and sends one final message", async () => {
     const adapter = createTestAdapter();
