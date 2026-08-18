@@ -660,11 +660,7 @@ describe("LinqAdapter.markRead", () => {
   it("marks the thread chat as read", async () => {
     const adapter = createTestAdapter();
     const markAsRead = vi.fn().mockResolvedValue(undefined);
-    (
-      adapter as unknown as { apiClient: { chats: { markAsRead: typeof markAsRead } } }
-    ).apiClient = {
-      chats: { markAsRead },
-    };
+    withApiClient(adapter, { chats: { markAsRead } });
     vi.spyOn(adapter, "decodeThreadId").mockReturnValue({
       chatId: "3caaf1a0-ef9f-46e0-8c22-31e82c8514dc",
     });
