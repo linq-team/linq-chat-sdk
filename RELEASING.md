@@ -41,18 +41,26 @@ The adapter is pre-1.0, so we use `0.MINOR.PATCH`:
 
 ## One-time setup
 
-The publish workflow needs a single repository or org secret:
+No npm token is required. `@linqapp/chat-sdk-adapter` publishes through npm
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): the package is
+configured on npm to trust this repository's `publish.yml` workflow, and the
+workflow authenticates over OIDC.
 
-| Secret      | Used for                                                              |
-| ----------- | --------------------------------------------------------------------- |
-| `NPM_TOKEN` | An npm **automation** token with publish access to the `@linqapp` scope. |
+Deliberately no `NODE_AUTH_TOKEN` is set on the publish step. The npm CLI
+prefers OIDC when it detects the environment and falls back to a token
+otherwise, so setting one would shadow trusted publishing.
 
 `GITHUB_TOKEN` is provided by Actions; the workflow requests `contents: write`
-(tag + release) and `id-token: write` (provenance).
+(tag + release) and `id-token: write` (the OIDC token npm exchanges for
+publish rights). Provenance is generated automatically under trusted
+publishing, so the workflow does not pass `--provenance`.
+
+Changing the workflow's filename or path breaks publishing until the trusted
+publisher entry on npm is updated to match.
 
 ## Publishing by hand
 
-Only needed if Actions is down or the token is broken:
+Only needed if Actions is down or trusted publishing is misconfigured:
 
 ```bash
 pnpm install --frozen-lockfile
