@@ -40,6 +40,8 @@ type LinqOutboundPart =
 type LinqThreadId = {
   chatId: string;
   isGroup?: boolean;
+  /** Target handle for a thread opened before its chat exists. See `openDM`. */
+  pendingHandle?: string;
 };
 
 /** Credentials for Linq's outbound API and direct signed webhooks. */
@@ -139,6 +141,10 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   // same Chat SDK thread no matter which path (webhook, fetch, send) produced it.
   // Group/DM identity lives in `chatKinds` instead of the thread ID.
   encodeThreadId(platformData: LinqThreadId): string {
+    if (platformData.pendingHandle) {
+      return `linq:pending:${platformData.pendingHandle}`;
+    }
+
     if (platformData.isGroup !== undefined) {
       this.chatKinds.set(platformData.chatId, platformData.isGroup);
     }
@@ -151,6 +157,19 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     if (adapterName !== "linq" || !chatId) {
       throw new Error(`Invalid Linq thread ID: ${threadId}`);
+    }
+
+    // A thread opened with openDM() has no chat until its first message.
+    // Linq cannot create an empty chat, so the target handle rides in the
+    // thread ID and the chat is created on the first post.
+    if (chatId === "pending") {
+      const pendingHandle = threadId.slice("linq:pending:".length);
+
+      if (!pendingHandle) {
+        throw new Error(`Invalid Linq thread ID: ${threadId}`);
+      }
+
+      return { chatId: "", pendingHandle, isGroup: false };
     }
 
     // Older adapter versions encoded group/dm into the thread ID. Keep decoding
@@ -174,7 +193,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     threadId: string,
     options?: FetchOptions,
   ): Promise<FetchResult<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
     const page = await (await this.getApiClient()).chats.messages.list(chatId, {
       cursor: options?.cursor,
       limit: options?.limit,
@@ -214,7 +233,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     threadId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const { chatId, pendingHandle } = this.decodeThreadId(threadId);
     const text = this.converter.renderPostable(message).trim();
     const mediaParts = await buildLinqMediaParts(await this.getApiClient(), message);
 
@@ -251,7 +270,25 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new Error("Linq message must include text or media.");
     }
 
-    const response = await (await this.getApiClient()).chats.messages.send(chatId, {
+    const client = await this.getApiClient();
+
+    // A pending thread has no chat yet. `messages.create` lets Linq pick the
+    // sending line and reuses an existing chat with the same recipients, so a
+    // repeated first post lands in one conversation rather than forking it.
+    if (pendingHandle) {
+      const created = await client.messages.create({
+        to: [pendingHandle],
+        message: { parts },
+      });
+
+      return {
+        id: created.message.id,
+        threadId: this.encodeThreadId({ chatId: created.chat_id }),
+        raw: created as LinqRawMessage,
+      };
+    }
+
+    const response = await client.chats.messages.send(chatId, {
       message: { parts },
     });
 
@@ -262,12 +299,47 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     };
   }
 
+  // Chats
+  //
+  // Linq has no empty-chat primitive: a chat is created by its first message.
+  // openDM therefore returns a deterministic pending thread ID that carries the
+  // target handle, and postMessage creates the chat when the first message is
+  // sent. The ID is stable, so a caller can address someone it has never
+  // messaged without a round trip.
+  /**
+   * Decodes a thread ID for an operation that needs an existing Linq chat.
+   *
+   * A thread from `openDM` has none until its first message, so anything other
+   * than posting fails here with the remedy rather than a confusing API error.
+   */
+  private requireChatId(threadId: string): string {
+    const { chatId, pendingHandle } = this.decodeThreadId(threadId);
+
+    if (pendingHandle) {
+      throw new Error(
+        `Linq thread ${threadId} has no chat yet — send a message first to create it.`,
+      );
+    }
+
+    return chatId;
+  }
+
+  async openDM(handle: string): Promise<string> {
+    const pendingHandle = handle.trim();
+
+    if (!pendingHandle) {
+      throw new Error("Linq openDM requires a handle.");
+    }
+
+    return this.encodeThreadId({ chatId: "", pendingHandle });
+  }
+
   async editMessage(
     threadId: string,
     messageId: string,
     message: AdapterPostableMessage,
   ): Promise<RawMessage<LinqRawMessage>> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
     const text = this.converter.renderPostable(message).trim();
 
     if (!text) {
@@ -315,7 +387,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // Threads
   async fetchThread(threadId: string): Promise<ThreadInfo> {
-    const { chatId } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
     const chat = await (await this.getApiClient()).chats.retrieve(chatId);
 
     return {
@@ -330,7 +402,8 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   }
 
   async startTyping(threadId: string, _status?: string): Promise<void> {
-    const { chatId, isGroup } = this.decodeThreadId(threadId);
+    const chatId = this.requireChatId(threadId);
+    const { isGroup } = this.decodeThreadId(threadId);
 
     if (isGroup === true) {
       return;

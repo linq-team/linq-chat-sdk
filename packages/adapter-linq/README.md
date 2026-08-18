@@ -92,13 +92,29 @@ createLinqAdapter({
 | Streaming                                          | ⚠️ buffered — recipients see one final message                                                                                     |
 | Sticker reactions                                  | ❌ skipped (no Chat SDK equivalent)                                                                                                |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient's device                                                                                    |
-| `openDM()` / creating chats                        | ❌ Linq creates chats with an initial message, which doesn't match Chat SDK semantics — the adapter only replies to existing chats |
+| `openDM()` / creating chats                        | ✅ returns a pending thread; the chat is created on its first message                                                              |
 | Cards                                              | ⚠️ rendered natively as plain text + image media parts — buttons/selects show their labels but cannot trigger `onAction()`         |
 | Modals, slash commands                             | ❌ no Linq equivalent                                                                                                              |
 
 ## Thread IDs
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
+
+`openDM()` returns a **pending** thread ID, `linq:pending:{handle}`, for someone
+you have no chat with yet. Linq has no empty-chat primitive — a chat is created
+by its first message — so the target handle rides in the ID and the chat is
+created when you post:
+
+```ts
+const threadId = await adapter.openDM("+12025550147");
+const sent = await adapter.postMessage(threadId, "hey, following up on your order");
+sent.threadId; // "linq:9c1f0a2e-..." — the real chat, from here on
+```
+
+The ID is deterministic, so you can address a handle without a round trip.
+Posting reuses an existing chat with the same recipients rather than forking a
+second conversation. Any other operation on a pending thread — fetching
+messages, typing, reactions — throws, because there is nothing to act on yet.
 
 ## Attachments
 
