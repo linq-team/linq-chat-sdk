@@ -199,6 +199,9 @@ Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/
 # secret Linq actually issued, and run it through the adapter. Sends nothing.
 LINQ_API_KEY=<token> node smoke-live.mjs verify
 
+# proactive: openDM a handle with no existing chat, then post to it
+LINQ_API_KEY=<token> LINQ_TEST_TO=<your cell> node smoke-live.mjs opendm
+
 # outbound: bootstrap a chat and send text + two images (one by URL, one pre-uploaded)
 LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
   node smoke-live.mjs send

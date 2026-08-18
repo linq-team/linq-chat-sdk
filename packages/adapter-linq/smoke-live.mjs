@@ -6,6 +6,7 @@
 //   serve  — receive real webhooks (text/reactions) and optionally echo-reply
 //   verify — sign a delivery with a REAL Linq signing secret and run it through
 //            the adapter. Sends no messages, so it needs no phone and no tunnel.
+//   opendm — openDM() a handle with no existing chat, then post to it
 //
 // Run from packages/adapter-linq so deps + ./dist resolve.
 //
@@ -393,12 +394,65 @@ function deliveryFixture() {
   };
 }
 
+// Proves the proactive path: address a handle with no existing chat, then post.
+async function opendm() {
+  const to = need("LINQ_TEST_TO");
+  const a = adapter();
+
+  const threadId = await a.openDM(to);
+  console.log(`openDM(${to}) → ${threadId}`);
+
+  if (threadId !== `linq:pending:${to}`) {
+    console.error(`unexpected pending thread ID: ${threadId}`);
+    process.exit(1);
+  }
+
+  console.log("posting to the pending thread — watch your phone:");
+  let realThreadId = null;
+  const ok = await step("first post creates the chat", async () => {
+    const sent = await a.postMessage(threadId, "linq openDM smoke test 👋 — this chat did not exist a second ago");
+    realThreadId = sent.threadId;
+    if (!/^linq:[0-9a-f-]{36}$/.test(sent.threadId)) {
+      throw new Error(`expected a real chat thread ID, got ${sent.threadId}`);
+    }
+    return sent.threadId;
+  });
+
+  if (!ok) process.exit(1);
+
+  await step("a second post reuses that chat rather than forking one", async () => {
+    const again = await a.postMessage(threadId, "…and this one reused it");
+    if (again.threadId !== realThreadId) {
+      throw new Error(`forked a second chat: ${again.threadId} != ${realThreadId}`);
+    }
+    return again.threadId;
+  });
+
+  await step("operations needing a chat fail clearly on a pending thread", async () => {
+    await a
+      .openDM("+19999999999")
+      .then((pending) => a.fetchMessages(pending))
+      .then(
+        () => {
+          throw new Error("expected a throw");
+        },
+        (err) => {
+          if (!/has no chat yet/.test(err.message)) throw err;
+        },
+      );
+    return "throws with the remedy";
+  });
+
+  console.log(`\nopenDM verified — chat ${realThreadId}`);
+}
+
 const mode = process.argv[2];
 if (mode === "send") await send();
 else if (mode === "cards") await cards();
 else if (mode === "serve") await serve();
 else if (mode === "verify") await verify();
+else if (mode === "opendm") await opendm();
 else {
-  console.error("usage: node smoke-live.mjs <send|cards|serve|verify>");
+  console.error("usage: node smoke-live.mjs <send|cards|serve|verify|opendm>");
   process.exit(2);
 }
