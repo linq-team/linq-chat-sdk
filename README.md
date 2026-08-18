@@ -19,7 +19,7 @@ pnpm test
 
 The same checks run in CI on every pull request.
 
-The adapter package has no runtime dependencies beyond the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk), with `chat` as a peer dependency.
+The adapter package depends on the official [`@linqapp/sdk`](https://www.npmjs.com/package/@linqapp/sdk) and [`standardwebhooks`](https://www.npmjs.com/package/standardwebhooks) at runtime, with `chat` as a peer dependency.
 
 ## Releasing
 
