@@ -58,7 +58,7 @@ A Linq chat maps to a Chat SDK **thread**, a text to a **message**, and an iMess
 | Option          | Required | Description                                                                                                              |
 | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `apiKey`        | yes      | Linq API key, used for all outbound API calls.                                                                          |
-| `signingSecret` | yes      | Webhook signing secret. Inbound requests are verified with HMAC-SHA256 over `{timestamp}.{raw_body}`, with replay-window checks. |
+| `signingSecret` | yes      | Webhook signing secret. Inbound deliveries are verified with [Standard Webhooks](https://www.standardwebhooks.com), including replay-window checks. |
 | `baseURL`       | no       | Override the Linq API base URL (e.g. a sandbox host).                                                                   |
 
 ## Platform setup
@@ -79,11 +79,24 @@ A Linq chat maps to a Chat SDK **thread**, a text to a **message**, and an iMess
 export default async (request: Request) => chat.webhooks.linq(request);
 ```
 
-Requests are verified (HMAC-SHA256 with replay protection) before dispatch; an invalid or stale signature returns `401`.
+Deliveries are verified against the [Standard Webhooks](https://www.standardwebhooks.com) signature Linq sends — `webhook-id`, `webhook-timestamp`, `webhook-signature` — before dispatch, with replay protection. An invalid or stale signature returns `401`.
 
 ## Thread IDs
 
 Thread IDs are stable and always take the form `linq:{chatId}`, regardless of whether the thread was first seen via webhook or API. Group vs. DM identity is tracked internally from webhook payloads and `chats.retrieve()` calls; legacy `linq:{chatId}:group` / `linq:{chatId}:dm` IDs from older versions still decode.
+
+`openDM()` returns a pending thread ID, `linq:pending:{handle}`, for someone you
+have no chat with yet. Linq creates a chat by sending its first message, so the
+handle rides in the ID and the chat is created when you post:
+
+```ts
+const threadId = await adapter.openDM("+12025550147");
+await chat.thread(threadId).post("hey, following up on your order");
+```
+
+The ID is deterministic, so you can address a handle without a round trip, and
+posting reuses an existing chat with the same recipients rather than starting a
+parallel one.
 
 ## Message format
 
@@ -124,7 +137,7 @@ Custom emoji reactions pass through the default emoji resolver (e.g. `👍` → 
 | Streaming                                          | ⚠️ buffered — one final message           |
 | Sticker reactions                                  | ❌ no Chat SDK equivalent                 |
 | Delete message                                     | ❌ Linq cannot unsend on the recipient    |
-| `openDM()` / creating chats                        | ❌ Linq chats start with an initial message |
+| `openDM()` / creating chats                        | ✅ pending thread; the chat is created on its first message |
 | Modals, cards, slash commands                      | ❌ no iMessage equivalent                 |
 
 ## Examples
@@ -142,7 +155,7 @@ Custom emoji reactions pass through the default emoji resolver (e.g. `👍` → 
   "package": "@linqapp/chat-sdk-adapter",
   "tier": "vendor-official",
   "peerDependencies": { "chat": "^4.28.1" },
-  "credentialMode": "apiKey + webhook signing secret (HMAC-SHA256)",
+  "credentialMode": "apiKey + webhook signing secret (Standard Webhooks)",
   "environmentVariables": ["LINQ_API_KEY", "LINQ_WEBHOOK_SECRET"],
   "constructorConfig": {
     "apiKey": { "required": true, "env": "LINQ_API_KEY" },
