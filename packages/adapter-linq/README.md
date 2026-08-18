@@ -179,6 +179,10 @@ A full example app (Nitro server wiring Linq, Telegram, and WhatsApp adapters in
 Get a sandbox number with the [Linq CLI](https://www.npmjs.com/package/@linqapp/cli): `linq signup --phone <your cell>`, then grab the token from `~/.linq/config.json`.
 
 ```bash
+# signing: create a throwaway webhook subscription, sign a delivery with the
+# secret Linq actually issued, and run it through the adapter. Sends nothing.
+LINQ_API_KEY=<token> node smoke-live.mjs verify
+
 # outbound: bootstrap a chat and send text + two images (one by URL, one pre-uploaded)
 LINQ_API_KEY=<token> LINQ_FROM=<sandbox number> LINQ_TEST_TO=<your cell> \
   node smoke-live.mjs send
