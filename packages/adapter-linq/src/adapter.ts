@@ -27,7 +27,10 @@ import {
 } from "./message-parser.js";
 import { buildLinqMediaParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
-import { verifyLinqWebhookRequest } from "./verification.js";
+import {
+  verifyLinqWebhookRequest,
+  type LinqWebhookVerificationResult,
+} from "./verification.js";
 
 type LinqOutboundPart =
   | { type: "text"; value: string }
@@ -366,8 +369,6 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
   // handle webhook
   async handleWebhook(request: Request, options?: WebhookOptions): Promise<Response> {
-    type LinqWebhookEvent = LinqAPIV3.UnwrapWebhookEvent;
-
     const verification = this.webhookVerifier
       ? await this.verifyTrustedWebhook(request)
       : await verifyLinqWebhookRequest(request, await this.getSigningSecret());
@@ -376,13 +377,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       return verification.response;
     }
 
-    let event: LinqWebhookEvent;
-
-    try {
-      event = JSON.parse(new TextDecoder().decode(verification.rawBody)) as LinqWebhookEvent;
-    } catch {
-      return new Response("Invalid JSON", { status: 400 });
-    }
+    const { event } = verification;
 
     if (this.chat && isMessageReceivedWebhookEvent(event) && event.data.direction === "inbound") {
       const chatId = event.data.chat.id;
@@ -416,10 +411,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     return new Response("OK", { status: 200 });
   }
 
-  private async verifyTrustedWebhook(request: Request): Promise<
-    | { ok: true; rawBody: Uint8Array }
-    | { ok: false; response: Response }
-  > {
+  private async verifyTrustedWebhook(request: Request): Promise<LinqWebhookVerificationResult> {
     const rawBody = new Uint8Array(await request.arrayBuffer());
 
     try {
@@ -431,7 +423,14 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       return { ok: false, response: new Response("Invalid Linq webhook", { status: 401 }) };
     }
 
-    return { ok: true, rawBody };
+    try {
+      return {
+        ok: true,
+        event: JSON.parse(new TextDecoder().decode(rawBody)) as LinqAPIV3.UnwrapWebhookEvent,
+      };
+    } catch {
+      return { ok: false, response: new Response("Invalid JSON", { status: 400 }) };
+    }
   }
 
   private processReactionWebhook(
