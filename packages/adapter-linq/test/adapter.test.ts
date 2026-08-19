@@ -23,12 +23,12 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(credentials).toHaveBeenCalledOnce();
   });
 
-  it("uses a trusted webhook verifier with API-key-only managed credentials", async () => {
-    const credentials = vi.fn(async () => ({ apiKey: API_KEY }));
+  it("uses a trusted webhook verifier with a lazy API key resolver", async () => {
+    const apiKey = vi.fn(async () => API_KEY);
     const webhookVerifier = vi.fn(async (_request: Request, rawBody: Uint8Array) => {
       expect(new TextDecoder().decode(rawBody)).toContain('"event_type":"message.received"');
     });
-    const adapter = createLinqAdapter({ credentials, webhookVerifier });
+    const adapter = createLinqAdapter({ apiKey, webhookVerifier });
     const response = await adapter.handleWebhook(
       new Request("https://example.com/webhooks/linq", {
         method: "POST",
@@ -37,7 +37,7 @@ describe("LinqAdapter.handleWebhook", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(credentials).not.toHaveBeenCalled();
+    expect(apiKey).not.toHaveBeenCalled();
     expect(webhookVerifier).toHaveBeenCalledOnce();
   });
 
@@ -370,6 +370,17 @@ describe("LinqAdapter.parseMessage", () => {
 });
 
 describe("LinqAdapter.postMessage", () => {
+  it("resolves a lazy API key for outbound calls", async () => {
+    const apiKey = vi.fn(async () => API_KEY);
+    const adapter = createLinqAdapter({ apiKey, signingSecret: SIGNING_SECRET });
+    const getApiClient = adapter["getApiClient"] as () => Promise<{ apiKey: string }>;
+
+    const client = await getApiClient.call(adapter);
+
+    expect(apiKey).toHaveBeenCalledOnce();
+    expect(client.apiKey).toBe(API_KEY);
+  });
+
   it("sends a text message to an existing Linq chat", async () => {
     const adapter = createTestAdapter();
     const send = vi.fn().mockResolvedValue({
