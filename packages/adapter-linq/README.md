@@ -53,26 +53,27 @@ Other event types are acknowledged with a `200` and ignored.
 
 ## Configuration
 
-| Option            | Required | Description                                                                                                                                 |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apiKey`          | direct   | Linq API key used for all outbound API calls.                                                                                               |
-| `signingSecret`   | direct   | Webhook signing secret. Deliveries are verified with [Standard Webhooks](https://www.standardwebhooks.com), including replay-window checks. |
-| `credentials`     | managed  | Lazy function returning `{ apiKey, signingSecret }`; use this for rotated or externally managed credentials.                                |
-| `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.                                  |
-| `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                                              |
+| Option            | Required | Description                                                                                                                              |
+| ----------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`          | yes      | Linq API key, or a lazy function that resolves one for outbound API calls.                                                               |
+| `signingSecret`   | depends  | Webhook signing secret for native [Standard Webhooks](https://www.standardwebhooks.com) verification. Not needed with `webhookVerifier`. |
+| `credentials`     | no       | Lazy function returning `{ apiKey, signingSecret }`; use only when both values are managed together.                                     |
+| `webhookVerifier` | no       | Verifies a trusted forwarded webhook using the unmodified raw body. Takes precedence over `signingSecret`.                               |
+| `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                                           |
 
-Use either the direct `apiKey` + `signingSecret` pair or `credentials`. A trusted
-webhook forwarder can use `webhookVerifier` instead of Linq's direct signature:
+Use a direct `apiKey` + `signingSecret` pair for native Linq webhook verification.
+For rotated API keys and trusted webhook forwarding, provide an `apiKey` resolver;
+`webhookVerifier` replaces Linq's direct signature verification:
 
 ```ts
 createLinqAdapter({
-  credentials: async () => ({
-    apiKey: await secrets.get("linq-api-key"),
-    signingSecret: await secrets.get("linq-webhook-secret"),
-  }),
+  apiKey: async () => await secrets.get("linq-api-key"),
   webhookVerifier: async (request, rawBody) => verifyForwardedWebhook(request, rawBody),
 });
 ```
+
+`credentials` remains available for integrations that manage the API key and Linq
+webhook signing secret as one credential bundle.
 
 ## Supported features
 

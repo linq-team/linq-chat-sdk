@@ -48,6 +48,12 @@ export interface LinqCredentials {
   signingSecret?: string;
 }
 
+/** Resolves an API key lazily, including from a managed credential store. */
+export type LinqApiKeyResolver = () => string | Promise<string>;
+
+/** A direct API key or a lazy API-key resolver. */
+export type LinqApiKey = string | LinqApiKeyResolver;
+
 /** Resolves credentials lazily, including from a managed credential store. */
 export type LinqCredentialProvider = () => LinqCredentials | Promise<LinqCredentials>;
 
@@ -61,8 +67,11 @@ export type LinqWebhookVerifier = (
 ) => unknown | Promise<unknown>;
 
 export interface LinqAdapterConfig {
-  /** Direct API key. Use with `signingSecret`, or prefer lazy `credentials`. */
-  apiKey?: string;
+  /**
+   * Direct API key or a lazy resolver for rotated, externally managed API keys.
+   * Use `credentials` only when the webhook signing secret is managed too.
+   */
+  apiKey?: LinqApiKey;
   baseURL?: string;
   /** Lazy credentials, for example from an externally managed credential store. */
   credentials?: LinqCredentialProvider;
@@ -76,6 +85,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   readonly name: string = "linq";
   readonly userName: string = "linq";
   private apiClient: LinqAPIV3 | null;
+  private readonly apiKey: LinqApiKeyResolver | undefined;
   private readonly baseURL: string | undefined;
   private readonly converter = new LinqFormatConverter();
   private readonly credentials: LinqCredentialProvider | undefined;
@@ -95,9 +105,11 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
       throw new Error("Linq requires signingSecret or a webhookVerifier.");
     }
 
-    this.apiClient = config.apiKey
-      ? new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL })
-      : null;
+    this.apiClient =
+      typeof config.apiKey === "string"
+        ? new LinqAPIV3({ apiKey: config.apiKey, baseURL: config.baseURL })
+        : null;
+    this.apiKey = typeof config.apiKey === "function" ? config.apiKey : undefined;
     this.baseURL = config.baseURL;
     this.credentials = config.credentials;
     this.signingSecret = config.signingSecret;
@@ -108,12 +120,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   private async getApiClient(): Promise<LinqAPIV3> {
     if (this.apiClient) return this.apiClient;
 
-    const credentials = await this.credentials?.();
-    if (!credentials?.apiKey) {
-      throw new Error("Linq credentials did not provide an API key.");
+    const apiKey = this.apiKey ? await this.apiKey() : (await this.credentials?.())?.apiKey;
+    if (!apiKey) {
+      throw new Error("Linq API key resolver did not provide an API key.");
     }
 
-    return new LinqAPIV3({ apiKey: credentials.apiKey, baseURL: this.baseURL });
+    return new LinqAPIV3({ apiKey, baseURL: this.baseURL });
   }
 
   private async getSigningSecret(): Promise<string> {
