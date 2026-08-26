@@ -1,4 +1,4 @@
-import { paragraph, parseMarkdown, root, strong, text, toPlainText } from "chat";
+import { emphasis, paragraph, parseMarkdown, root, strong, text, toPlainText } from "chat";
 import { describe, expect, it, vi } from "vitest";
 
 import { createLinqAdapter } from "../src/adapter";
@@ -30,6 +30,55 @@ describe("astToDecoratedText", () => {
     ]);
   });
 
+  // Asterisks and underscores are usually just characters — a typo correction,
+  // a footnote, an identifier. Nothing here may be eaten or styled.
+  it.each([
+    ["i meant to say this instead*", "i meant to say this instead*"],
+    ["50% off*, terms apply", "50% off*, terms apply"],
+    ["2 * 3 * 4 = 24", "2 * 3 * 4 = 24"],
+    ["snake_case_name here", "snake_case_name here"],
+    ["**", "**"],
+    ["\\*not bold\\*", "*not bold*"],
+    ["`**not bold**` code", "**not bold** code"],
+    ["<b>hi</b> there", "<b>hi</b> there"],
+  ])("leaves %j unstyled", (markdown, expected) => {
+    const { value, decorations } = astToDecoratedText(parseMarkdown(markdown));
+
+    expect(value).toBe(expected);
+    expect(decorations).toEqual([]);
+  });
+
+  it("marks italics from either delimiter", () => {
+    expect(astToDecoratedText(parseMarkdown("say *hi* now")).decorations).toEqual([
+      { range: [4, 6], style: "italic" },
+    ]);
+    expect(astToDecoratedText(parseMarkdown("say _hi_ now")).decorations).toEqual([
+      { range: [4, 6], style: "italic" },
+    ]);
+  });
+
+  it("gives every run on a mixed-style line its own range", () => {
+    const { value, decorations } = astToDecoratedText(parseMarkdown("_a_ and **b** and ~~c~~"));
+
+    expect(value).toBe("a and b and c");
+    expect(decorations).toEqual([
+      { range: [0, 1], style: "italic" },
+      { range: [6, 7], style: "bold" },
+      { range: [12, 13], style: "strikethrough" },
+    ]);
+  });
+
+  it("tracks offsets across several runs on one line", () => {
+    const { value, decorations } = astToDecoratedText(parseMarkdown("a **b** c **d** e"));
+
+    expect(decorations).toEqual([
+      { range: [2, 3], style: "bold" },
+      { range: [6, 7], style: "bold" },
+    ]);
+    expect(value.slice(2, 3)).toBe("b");
+    expect(value.slice(6, 7)).toBe("d");
+  });
+
   it("emits overlapping ranges for nested styles, which the API allows", () => {
     const { decorations } = astToDecoratedText(parseMarkdown("**_both_**"));
 
@@ -48,6 +97,23 @@ describe("astToDecoratedText", () => {
     expect(value.slice(3, 5)).toBe("hi");
   });
 
+  // The emoji is inside the bold run, so it has to push the range's end, not
+  // just its start.
+  it("extends a range past an emoji inside it", () => {
+    const { value, decorations } = astToDecoratedText(parseMarkdown("**a👍b** c"));
+
+    expect(decorations).toEqual([{ range: [0, 4], style: "bold" }]);
+    expect(value.slice(0, 4)).toBe("a👍b");
+  });
+
+  // Markdown cannot express empty emphasis, but an AST postable can, and a
+  // zero-length range decorates nothing and would be rejected by the API.
+  it("emits no decoration for a styled node with no text", () => {
+    const ast = root([paragraph([strong([text("")]), text("hi"), emphasis([])])]);
+
+    expect(astToDecoratedText(ast)).toEqual({ value: "hi", decorations: [] });
+  });
+
   it("produces no decorations for unformatted text", () => {
     expect(astToDecoratedText(parseMarkdown("plain text")).decorations).toEqual([]);
   });
@@ -60,6 +126,12 @@ describe("astToDecoratedText", () => {
     "plain text",
     "- one\n- two",
     "[link](https://linqapp.com) text",
+    "\\*not bold\\*",
+    "`**not bold**` code",
+    "<b>hi</b> there",
+    "**![pic](https://linqapp.com/b.png)**",
+    "a*b*c",
+    "| a | **b** |\n| - | - |\n| c | d |",
   ])("renders the same text as toPlainText for %j", (markdown) => {
     const ast = parseMarkdown(markdown);
 
@@ -79,6 +151,24 @@ describe("trimDecoratedText", () => {
     expect(trimmed.value).toBe("hi there");
     expect(trimmed.decorations).toEqual([{ range: [0, 2], style: "bold" }]);
     expect(trimmed.value.slice(0, 2)).toBe("hi");
+  });
+
+  it("clamps a range that straddles both trimmed edges", () => {
+    const trimmed = trimDecoratedText({
+      value: "  hi  ",
+      decorations: [{ range: [0, 6], style: "bold" }],
+    });
+
+    expect(trimmed).toEqual({ value: "hi", decorations: [{ range: [0, 2], style: "bold" }] });
+  });
+
+  it("drops a range that lived entirely in the leading whitespace", () => {
+    const trimmed = trimDecoratedText({
+      value: "  hi",
+      decorations: [{ range: [0, 2], style: "bold" }],
+    });
+
+    expect(trimmed).toEqual({ value: "hi", decorations: [] });
   });
 
   it("drops a range that trimming removed entirely", () => {
@@ -140,6 +230,44 @@ describe("postMessage decorations and idempotency", () => {
       value: "say hi",
       text_decorations: [{ range: [4, 6], style: "bold" }],
     });
+  });
+
+  it("sends italics and strikethrough, not just bold", async () => {
+    const { adapter, send } = adapterWithSend();
+
+    await adapter.postMessage(`linq:${CHAT_ID}`, { markdown: "_a_ and ~~b~~" });
+
+    expect(textPart(send)).toEqual({
+      type: "text",
+      value: "a and b",
+      text_decorations: [
+        { range: [0, 1], style: "italic" },
+        { range: [6, 7], style: "strikethrough" },
+      ],
+    });
+  });
+
+  // A trailing asterisk correcting a typo is the message, not syntax: it has to
+  // reach the wire as a character, with nothing styled.
+  it("sends an unmatched asterisk as text, not syntax", async () => {
+    const { adapter, send } = adapterWithSend();
+
+    await adapter.postMessage(`linq:${CHAT_ID}`, { markdown: "i meant to say this instead*" });
+
+    expect(textPart(send)).toEqual({ type: "text", value: "i meant to say this instead*" });
+  });
+
+  // Strings and `raw` are verbatim text. Parsing them would eat asterisks the
+  // caller typed on purpose.
+  it.each([
+    ["a plain string", "say **hi**"],
+    ["a raw postable", { raw: "say **hi**" }],
+  ])("never parses %s as markdown", async (_label, message) => {
+    const { adapter, send } = adapterWithSend();
+
+    await adapter.postMessage(`linq:${CHAT_ID}`, message);
+
+    expect(textPart(send)).toEqual({ type: "text", value: "say **hi**" });
   });
 
   it("omits the key entirely for unformatted text", async () => {
