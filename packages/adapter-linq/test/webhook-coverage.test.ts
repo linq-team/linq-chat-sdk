@@ -18,7 +18,7 @@ describe("webhook event coverage", () => {
   it("records a disposition for every event the SDK can send", () => {
     // The Record<WebhookEventType, …> type enforces this at compile time; this
     // asserts the runtime object was not widened or partially built.
-    expect(Object.keys(WEBHOOK_EVENT_COVERAGE).length).toBeGreaterThanOrEqual(44);
+    expect(Object.keys(WEBHOOK_EVENT_COVERAGE).length).toBeGreaterThanOrEqual(46);
   });
 
   it("gives every ignored event a stated reason", () => {
