@@ -80,6 +80,8 @@ createLinqAdapter({
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Inbound text messages                              | ✅                                                                                                                         |
 | Outbound text messages                             | ✅                                                                                                                         |
+| Inline text decorations                            | ✅ markdown styling sent as `text_decorations` (iMessage only)                                                             |
+| Idempotent sends                                   | ✅ `idempotencyKey` send option                                                                                            |
 | Group chats                                        | ✅ reply to existing groups received via webhook                                                                           |
 | Inbound media (images, audio, files)               | ✅ parsed as attachments with downloadable data                                                                            |
 | Outbound media / file sending                      | ✅ `attachments` and `files` on a message become media parts                                                               |
@@ -165,6 +167,43 @@ The ID is deterministic, so you can address a handle without a round trip.
 Posting reuses an existing chat with the same recipients rather than forking a
 second conversation. Any other operation on a pending thread — fetching
 messages, typing, reactions — throws, because there is nothing to act on yet.
+
+## Text decorations
+
+Markdown formatting is sent as real iMessage styling rather than flattened to
+plain text:
+
+```ts
+await thread.post({ markdown: "your order **shipped** today" });
+// → value: "your order shipped today"
+//   text_decorations: [{ range: [11, 18], style: "bold" }]
+```
+
+`**bold**`, `_italic_`, and `~~strikethrough~~` all map across, and nested
+styles produce overlapping ranges. Decorations render per recipient: in a mixed
+group, iMessage participants see the styling and SMS/RCS participants get the
+same message as plain text.
+
+Underline and the animated effects have no markdown syntax, so they go through
+the send options — which also carry the idempotency key:
+
+```ts
+await adapter.postMessage(
+  threadId,
+  { markdown: "your order shipped" },
+  {
+    textDecorations: [{ range: [0, 4], animation: "shake" }],
+    idempotencyKey: job.id,
+  },
+);
+```
+
+Caller decorations are appended to the ones derived from the markdown. Styles
+may overlap each other freely, but an animation may not overlap any other
+decoration — the adapter throws rather than letting the API reject the send.
+
+Make the idempotency key stable across retries of the same logical send; a
+value generated per call dedupes nothing.
 
 ## Attachments
 

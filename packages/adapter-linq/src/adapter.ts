@@ -27,6 +27,7 @@ import {
 } from "./message-parser.js";
 import { buildLinqMediaParts } from "./outbound-media.js";
 import { fromLinqReaction, toLinqReaction } from "./reactions.js";
+import { assertDecorationsSendable, trimDecoratedText } from "./text-decorations.js";
 import { verifyLinqWebhookRequest, type LinqWebhookVerificationResult } from "./verification.js";
 
 const DELIVERY_STATUS_EVENTS: Partial<Record<LinqAPIV3.WebhookEventType, LinqDeliveryStatus>> = {
@@ -53,8 +54,23 @@ export interface LinqDeliveryStatusEvent {
 /** Receives delivery-status changes. Return value is ignored. */
 export type LinqDeliveryStatusListener = (event: LinqDeliveryStatusEvent) => void;
 
+/** Linq-native send options with no Chat SDK equivalent. */
+export interface LinqSendOptions {
+  /**
+   * Decorations appended to the ones derived from the message's markdown.
+   * The only way to reach animations and underline, which markdown cannot
+   * express. iMessage only; SMS/RCS recipients see plain text.
+   */
+  readonly textDecorations?: LinqAPIV3.TextDecoration[];
+  /**
+   * Dedupes retries of the same logical send. Must be stable across retries
+   * to have any effect — a per-call value dedupes nothing. Max 255 chars.
+   */
+  readonly idempotencyKey?: string;
+}
+
 type LinqOutboundPart =
-  | { type: "text"; value: string }
+  | { type: "text"; value: string; text_decorations?: LinqAPIV3.TextDecoration[] }
   | { type: "media"; url: string }
   | { type: "media"; attachment_id: string };
 
@@ -256,9 +272,12 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
   async postMessage(
     threadId: string,
     message: AdapterPostableMessage,
+    options: LinqSendOptions = {},
   ): Promise<RawMessage<LinqRawMessage>> {
     const { chatId, pendingHandle } = this.decodeThreadId(threadId);
-    const text = this.converter.renderPostable(message).trim();
+    const { value: text, decorations } = trimDecoratedText(
+      this.converter.renderDecoratedPostable(message),
+    );
     const mediaParts = await buildLinqMediaParts(await this.getApiClient(), message);
 
     const parts: LinqOutboundPart[] = [];
@@ -266,7 +285,14 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     // Text leads so the message reads as [text, media, ...]; Linq disallows
     // consecutive text parts but is fine with a single text part before media.
     if (text) {
-      parts.push({ type: "text", value: text });
+      const textDecorations = [...decorations, ...(options.textDecorations ?? [])];
+
+      assertDecorationsSendable(textDecorations);
+      parts.push(
+        textDecorations.length
+          ? { type: "text", value: text, text_decorations: textDecorations }
+          : { type: "text", value: text },
+      );
     }
 
     // Card images become real media parts; the rest of the card is already
@@ -295,6 +321,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     const client = await this.getApiClient();
+    const idempotency = options.idempotencyKey ? { idempotency_key: options.idempotencyKey } : {};
 
     // A pending thread has no chat yet. `messages.create` lets Linq pick the
     // sending line and reuses an existing chat with the same recipients, so a
@@ -302,7 +329,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     if (pendingHandle) {
       const created = await client.messages.create({
         to: [pendingHandle],
-        message: { parts },
+        message: { parts, ...idempotency },
       });
 
       return {
@@ -313,7 +340,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
     }
 
     const response = await client.chats.messages.send(chatId, {
-      message: { parts },
+      message: { parts, ...idempotency },
     });
 
     return {

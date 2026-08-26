@@ -6,5 +6,7 @@ export type {
   LinqDeliveryStatusListener,
   LinqCredentialProvider,
   LinqCredentials,
+  LinqSendOptions,
   LinqWebhookVerifier,
 } from "./adapter.js";
+export type { DecoratedText } from "./text-decorations.js";
