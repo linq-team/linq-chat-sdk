@@ -48,6 +48,7 @@ export const WEBHOOK_EVENT_COVERAGE: Record<LinqAPIV3.WebhookEventType, WebhookE
   "chat.group_name_update_failed": { ignored: NOT_YET_IMPLEMENTED },
   "chat.group_icon_update_failed": { ignored: NOT_YET_IMPLEMENTED },
   "chat.background_updated": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
+  "chat.background_update_failed": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
   "chat.typing_indicator.started": { ignored: NOT_YET_IMPLEMENTED },
   "chat.typing_indicator.stopped": { ignored: NOT_YET_IMPLEMENTED },
 
@@ -73,6 +74,10 @@ export const WEBHOOK_EVENT_COVERAGE: Record<LinqAPIV3.WebhookEventType, WebhookE
   "payment.expired": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
   "connection.created": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
   "connection.revoked": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
+
+  // Contact sharing. Scoped to a line rather than a chat, so it has no thread
+  // to dispatch against even if Chat SDK grew a contact primitive.
+  "contact_card.received": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
 
   // Location sharing.
   "location.sharing.started": { ignored: CHAT_SDK_HAS_NO_PRIMITIVE },
