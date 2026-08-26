@@ -15,7 +15,10 @@ The adapter can already handle the core receive/reply path:
 - Fetch recent chat history with `chats.messages.list()`.
 - Fetch a single message with `messages.retrieve()`.
 - Edit text messages with `messages.update()`.
-- Render formatted Chat SDK content as markdown text.
+- Render formatted Chat SDK content as inline text decorations (`**bold**`, `_italic_`,
+  `~~strikethrough~~` become `text_decorations` ranges; iMessage only, SMS/RCS see plain text).
+- Accept Linq-native send options on `postMessage` (`textDecorations` for animations and
+  underline, `idempotencyKey` to dedupe retries).
 - Add and remove reactions with `messages.addReaction()`.
 - Route inbound `reaction.added` / `reaction.removed` webhooks into Chat SDK `onReaction()` handlers (tapbacks map to normalized emoji, custom emoji pass through, stickers are skipped).
 - Encode stable Linq thread IDs (`linq:<chatId>`) so webhook and API paths map to the same thread.
@@ -78,7 +81,6 @@ Inbound attachments survive queue serialization via `rehydrateAttachment` (Linq 
 Still missing:
 
 - iMessage voice-memo bubbles (`POST /v3/chats/{chatId}/voicememo`) — audio currently sends as a downloadable file attachment
-- `idempotency_key` on sends to dedupe app-level retries
 
 ### 3. Inbound reaction webhooks
 
