@@ -13,62 +13,129 @@ const STYLE_BY_NODE_TYPE: Record<string, LinqAPIV3.TextDecoration["style"]> = {
   delete: "strikethrough",
 };
 
+/** How a node's children are joined: the whitespace between them, and which of
+ * them count. Mirrors `toPlainText`, whose separators are the only thing
+ * keeping blocks and list items off one another's lines. */
+interface JoinRule {
+  separator: string;
+  keeps: (text: string) => boolean;
+}
+
+const isNotEmpty = (text: string): boolean => text.length > 0;
+
+const JOIN_BY_NODE_TYPE: Record<string, JoinRule> = {
+  root: { separator: "\n\n", keeps: isNotEmpty },
+  list: { separator: "\n", keeps: isNotEmpty },
+  listItem: { separator: "\n", keeps: isNotEmpty },
+  blockquote: { separator: "\n", keeps: isNotEmpty },
+  // A header divider row renders as empty cells joined by tabs — whitespace,
+  // not nothing — so it takes a stronger test than the other blocks to drop.
+  table: { separator: "\n", keeps: (text) => text.trim().length > 0 },
+  // An empty cell still holds its column, so it keeps its tab.
+  tableRow: { separator: "\t", keeps: () => true },
+};
+
+/** Inline nodes run together: no separator, and empties add nothing. */
+const INLINE_JOIN: JoinRule = { separator: "", keeps: isNotEmpty };
+
 /**
  * Renders an mdast tree to text plus the decorations its formatting implies.
  *
- * The text is byte-identical to `toPlainText` (mdast-util-to-string) so the
- * wire value is unchanged; only the decorations are new. Offsets are UTF-16
- * code units, which is what JS string indices already are and what the Linq
- * API expects.
+ * The text is byte-identical to `toPlainText` so the wire value is unchanged;
+ * only the decorations are new. Offsets are UTF-16 code units, which is what JS
+ * string indices already are and what the Linq API expects.
  */
 export function astToDecoratedText(ast: FormattedContent): DecoratedText {
+  return renderNode(ast);
+}
+
+function renderNode(value: unknown): DecoratedText {
+  if (!value || typeof value !== "object") {
+    return { value: "", decorations: [] };
+  }
+
+  const node = value as Record<string, unknown>;
+  const own = ownText(node);
+
+  if (own !== null) {
+    return { value: own, decorations: [] };
+  }
+
+  const type = typeof node.type === "string" ? node.type : "";
+
+  // A hard break is a newline of its own, and a rule is nothing at all.
+  if (type === "break") {
+    return { value: "\n", decorations: [] };
+  }
+
+  if (type === "thematicBreak") {
+    return { value: "", decorations: [] };
+  }
+
+  const rendered = joinChildren(node, JOIN_BY_NODE_TYPE[type] ?? INLINE_JOIN);
+  const style = STYLE_BY_NODE_TYPE[type];
+
+  // Children first, so a nested style's range precedes the one wrapping it.
+  if (style && rendered.value.length > 0) {
+    rendered.decorations.push({ range: [0, rendered.value.length], style });
+  }
+
+  return rendered;
+}
+
+/**
+ * Joins a node's children, shifting each child's ranges by everything already
+ * emitted — separators included, or every range after one slides off its
+ * characters.
+ */
+function joinChildren(
+  node: Record<string, unknown>,
+  { separator, keeps }: JoinRule,
+): DecoratedText {
+  if (!Array.isArray(node.children)) {
+    return { value: "", decorations: [] };
+  }
+
   const chunks: string[] = [];
   const decorations: LinqAPIV3.TextDecoration[] = [];
   let length = 0;
 
-  const emit = (value: unknown): void => {
-    if (typeof value === "string" && value) {
-      chunks.push(value);
-      length += value.length;
-    }
-  };
+  for (const child of node.children) {
+    const rendered = renderNode(child);
 
-  const one = (value: unknown): void => {
-    if (Array.isArray(value)) {
-      all(value);
-      return;
+    // A dropped child contributes no text, so no separator and no ranges.
+    if (!keeps(rendered.value)) {
+      continue;
     }
 
-    if (!value || typeof value !== "object") {
-      return;
+    if (chunks.length) {
+      chunks.push(separator);
+      length += separator.length;
     }
 
-    const node = value as Record<string, unknown>;
-    const style = typeof node.type === "string" ? STYLE_BY_NODE_TYPE[node.type] : undefined;
-    const start = length;
-
-    if ("value" in node) {
-      emit(node.value);
-    } else if (node.alt) {
-      emit(node.alt);
-    } else if ("children" in node) {
-      one(node.children);
+    for (const decoration of rendered.decorations) {
+      const [start = 0, end = 0] = decoration.range;
+      decorations.push({ ...decoration, range: [start + length, end + length] });
     }
 
-    if (style && length > start) {
-      decorations.push({ range: [start, length], style });
-    }
-  };
-
-  const all = (values: unknown[]): void => {
-    for (const value of values) {
-      one(value);
-    }
-  };
-
-  one(ast);
+    chunks.push(rendered.value);
+    length += rendered.value.length;
+  }
 
   return { value: chunks.join(""), decorations };
+}
+
+/** A leaf's own text: its value, or an image's alt text standing in for it. */
+function ownText(node: Record<string, unknown>): string | null {
+  if (typeof node.value === "string") {
+    return node.value;
+  }
+
+  if (typeof node.alt === "string") {
+    return node.alt;
+  }
+
+  return null;
 }
 
 /**

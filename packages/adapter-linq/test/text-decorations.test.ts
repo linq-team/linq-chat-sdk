@@ -118,6 +118,61 @@ describe("astToDecoratedText", () => {
     expect(astToDecoratedText(parseMarkdown("plain text")).decorations).toEqual([]);
   });
 
+  // Regression: the renderer used to concatenate every block and list item,
+  // producing "Pregame pick97 Wythe Avefirst detailsecond detail".
+  it("separates headings, paragraphs, and list items", () => {
+    const markdown = ["### Pregame pick", "97 Wythe Ave", "- first detail", "- second detail"].join(
+      "\n",
+    );
+
+    expect(astToDecoratedText(parseMarkdown(markdown)).value).toBe(
+      "Pregame pick\n\n97 Wythe Ave\n\nfirst detail\nsecond detail",
+    );
+  });
+
+  // Separators sit between the chunks they divide, so every range after one has
+  // to move by its length or the style lands on the wrong characters.
+  it("shifts ranges past the separators that precede them", () => {
+    const markdown = ["**a**", "", "- **b**", "- **c**"].join("\n");
+    const { value, decorations } = astToDecoratedText(parseMarkdown(markdown));
+
+    expect(value).toBe("a\n\nb\nc");
+    expect(decorations).toEqual([
+      { range: [0, 1], style: "bold" },
+      { range: [3, 4], style: "bold" },
+      { range: [5, 6], style: "bold" },
+    ]);
+    expect(value.slice(3, 4)).toBe("b");
+    expect(value.slice(5, 6)).toBe("c");
+  });
+
+  // A hard break is its own newline, not a separator between blocks.
+  it("renders a hard break as a single newline", () => {
+    expect(astToDecoratedText(parseMarkdown("line one  \nline two")).value).toBe(
+      "line one\nline two",
+    );
+  });
+
+  // An empty child contributes no separator, so a blank block must not open a
+  // gap that slides later ranges off their characters.
+  it("emits no separator for a block that renders empty", () => {
+    const { value, decorations } = astToDecoratedText(parseMarkdown("a\n\n---\n\n**b**"));
+
+    expect(value).toBe("a\n\nb");
+    expect(decorations).toEqual([{ range: [3, 4], style: "bold" }]);
+    expect(value.slice(3, 4)).toBe("b");
+  });
+
+  it("joins table cells with tabs and rows with newlines", () => {
+    const { value, decorations } = astToDecoratedText(
+      parseMarkdown("| a | **b** |\n| - | - |\n| c | d |"),
+    );
+
+    expect(value).toBe("a\tb\nc\td");
+    expect(decorations).toEqual([{ range: [2, 3], style: "bold" }]);
+    expect(value.slice(2, 3)).toBe("b");
+  });
+
   // The wire value must not change: only decorations are new.
   it.each([
     "say **hi** now",
@@ -132,6 +187,13 @@ describe("astToDecoratedText", () => {
     "**![pic](https://linqapp.com/b.png)**",
     "a*b*c",
     "| a | **b** |\n| - | - |\n| c | d |",
+    "### Pregame pick\n97 Wythe Ave\n- first detail\n- second detail",
+    "one\n\ntwo\n\nthree",
+    "> quoted\n> lines",
+    "line one  \nline two",
+    "para\n\n---\n\nafter",
+    "1. one\n2. two",
+    "- outer\n  - inner\n- last",
   ])("renders the same text as toPlainText for %j", (markdown) => {
     const ast = parseMarkdown(markdown);
 

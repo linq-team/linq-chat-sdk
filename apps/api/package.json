@@ -16,13 +16,13 @@
     "nitro": "latest"
   },
   "dependencies": {
-    "@chat-adapter/state-pg": "^4.28.1",
-    "@chat-adapter/telegram": "^4.28.1",
-    "@chat-adapter/whatsapp": "^4.28.1",
+    "@chat-adapter/state-pg": "^4.39.0",
+    "@chat-adapter/telegram": "^4.39.0",
+    "@chat-adapter/whatsapp": "^4.39.0",
     "@linqapp/chat-sdk-adapter": "workspace:*",
     "@linqapp/sdk": "^0.47.0",
     "ai": "^6.0.184",
-    "chat": "^4.28.1",
+    "chat": "^4.39.0",
     "pg": "^8.20.0",
     "zod": "^4.4.3"
   }
