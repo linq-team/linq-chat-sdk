@@ -27,6 +27,7 @@ describe("LinqAdapter.handleWebhook", () => {
     const credentials = vi.fn(async () => ({ apiKey: API_KEY }));
     const webhookVerifier = vi.fn(async (_request: Request, rawBody: Uint8Array) => {
       expect(new TextDecoder().decode(rawBody)).toContain('"event_type":"message.received"');
+      return true;
     });
     const adapter = createLinqAdapter({ credentials, webhookVerifier });
     const response = await adapter.handleWebhook(
@@ -40,6 +41,24 @@ describe("LinqAdapter.handleWebhook", () => {
     expect(credentials).not.toHaveBeenCalled();
     expect(webhookVerifier).toHaveBeenCalledOnce();
   });
+
+  it.each([false, 0, "", null, undefined, NaN])(
+    "rejects a trusted webhook when its verifier returns %s",
+    async (result) => {
+      const adapter = createLinqAdapter({
+        apiKey: API_KEY,
+        webhookVerifier: async () => result,
+      });
+      const response = await adapter.handleWebhook(
+        new Request("https://example.com/webhooks/linq", {
+          method: "POST",
+          body: JSON.stringify(createMessageReceivedPayload()),
+        }),
+      );
+
+      expect(response.status).toBe(401);
+    },
+  );
 
   it("rejects API-key-only credentials when direct webhook verification needs a signing secret", async () => {
     const credentials = vi.fn(async () => ({ apiKey: API_KEY }));

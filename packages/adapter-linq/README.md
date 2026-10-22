@@ -62,7 +62,9 @@ Other event types are acknowledged with a `200` and ignored.
 | `baseURL`         | no       | Override the Linq API base URL (e.g. sandbox).                                                                                              |
 
 Use either the direct `apiKey` + `signingSecret` pair or `credentials`. A trusted
-webhook forwarder can use `webhookVerifier` instead of Linq's direct signature:
+webhook forwarder can use `webhookVerifier` instead of Linq's direct signature.
+The verifier must return a truthy value to accept a delivery; a falsy value or
+an exception rejects it:
 
 ```ts
 createLinqAdapter({

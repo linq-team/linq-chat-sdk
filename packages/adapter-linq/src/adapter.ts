@@ -92,8 +92,9 @@ export interface LinqCredentials {
 export type LinqCredentialProvider = () => LinqCredentials | Promise<LinqCredentials>;
 
 /**
- * Verifies a trusted, forwarded webhook. Throw (or return `false`) to reject
- * the request. It takes precedence over Linq's direct HMAC verification.
+ * Verifies a trusted, forwarded webhook. Return a truthy value to accept;
+ * throw or return a falsy value to reject. Takes precedence over Linq's
+ * direct HMAC verification.
  */
 export type LinqWebhookVerifier = (
   request: Request,
@@ -558,7 +559,7 @@ class LinqAdapter implements Adapter<LinqThreadId, LinqRawMessage> {
 
     try {
       const result = await this.webhookVerifier?.(request, rawBody);
-      if (result === false) {
+      if (!result) {
         return { ok: false, response: new Response("Invalid Linq webhook", { status: 401 }) };
       }
     } catch {
